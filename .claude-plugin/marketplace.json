@@ -1,0 +1,20 @@
+{
+  "name": "tradingview-mcp-marketplace",
+  "description": "TradingView MCP plugin: market data, SMC/ICT scanning, chart rendering, backtesting, journal sync, Pine compile for AI agents.",
+  "owner": {
+    "name": "tvmcp"
+  },
+  "plugins": [
+    {
+      "name": "tradingview-mcp",
+      "source": ".",
+      "description": "TradingView toolkit for AI agents: screener, FX data, SMC/ICT scanning, chart rendering, backtesting, journal sync, Pine compile. Not affiliated with TradingView, Inc.",
+      "version": "0.1.0",
+      "author": {
+        "name": "tvmcp"
+      },
+      "license": "MIT",
+      "skills": "./skills"
+    }
+  ]
+}

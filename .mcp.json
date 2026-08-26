@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tradingview": {
+      "command": "uv",
+      "args": ["run", "--project", "${CLAUDE_PLUGIN_ROOT:-${CLAUDE_PROJECT_DIR:-.}}", "python", "-m", "tvmcp"]
+    }
+  }
+}

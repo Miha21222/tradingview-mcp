@@ -1,0 +1,82 @@
+{
+  "name": "tradingview-mcp",
+  "displayName": "TradingView MCP",
+  "version": "0.1.0",
+  "description": "TradingView toolkit for AI agents: screener, FX data, SMC/ICT scanning, chart rendering, backtesting, journal sync, Pine compile. Not affiliated with TradingView, Inc.",
+  "license": "MIT",
+  "author": {
+    "name": "tvmcp"
+  },
+  "userConfig": {
+    "OANDA_API_KEY": {
+      "type": "string",
+      "title": "OANDA API key",
+      "description": "Optional. Enables the OANDA OHLCV provider (free practice account at oanda.com). Stored as a secret.",
+      "sensitive": true
+    },
+    "TV_SESSIONID": {
+      "type": "string",
+      "title": "TradingView sessionid cookie",
+      "description": "Optional. Enables the opt-in `session` toolset (reads data through your TradingView account - may violate TradingView's ToS). Stored as a secret.",
+      "sensitive": true
+    },
+    "TV_TOOLSETS": {
+      "type": "string",
+      "title": "Enabled toolsets",
+      "description": "Comma list. Default = public,data. Add scan,chart,backtest,journal,strategy as needed; session/desktop/pine are opt-in and carry ToS risk."
+    },
+    "TV_READ_ONLY": {
+      "type": "string",
+      "title": "Read-only mode",
+      "description": "Set to 1 to disable all write-capable tools (hard-wins over everything)."
+    },
+    "TV_MAX_BARS": {
+      "type": "string",
+      "title": "Max bars per response",
+      "description": "Hard cap on bars returned by data tools (default 5000)."
+    },
+    "OANDA_ENV": {
+      "type": "string",
+      "title": "OANDA environment",
+      "description": "practice (default) or live."
+    },
+    "TV_CHART_DIR": {
+      "type": "string",
+      "title": "Rendered PNG output directory",
+      "description": "Where tv_chart_render writes PNGs."
+    },
+    "TV_JOURNAL_DIR": {
+      "type": "string",
+      "title": "FX Replay journal watch-folder",
+      "description": "Where tv_journal_scan / tv_journal_parse read CSV exports."
+    },
+    "TV_STRATEGY_DIR": {
+      "type": "string",
+      "title": "Declarative strategy folder",
+      "description": "Where tv_strategy_list / tv_strategy_run read YAML strategy specs."
+    },
+    "TV_CDP_URL": {
+      "type": "string",
+      "title": "TradingView Desktop CDP URL",
+      "description": "e.g. http://127.0.0.1:9223 for the opt-in `desktop` toolset."
+    }
+  },
+  "mcpServers": {
+    "tradingview": {
+      "command": "uv",
+      "args": ["run", "--project", "${CLAUDE_PLUGIN_ROOT}", "python", "-m", "tvmcp"],
+      "env": {
+        "OANDA_API_KEY": "${OANDA_API_KEY}",
+        "TV_SESSIONID": "${TV_SESSIONID}",
+        "TV_TOOLSETS": "${TV_TOOLSETS}",
+        "TV_READ_ONLY": "${TV_READ_ONLY}",
+        "TV_MAX_BARS": "${TV_MAX_BARS}",
+        "OANDA_ENV": "${OANDA_ENV}",
+        "TV_CHART_DIR": "${TV_CHART_DIR}",
+        "TV_JOURNAL_DIR": "${TV_JOURNAL_DIR}",
+        "TV_STRATEGY_DIR": "${TV_STRATEGY_DIR}",
+        "TV_CDP_URL": "${TV_CDP_URL}"
+      }
+    }
+  }
+}
