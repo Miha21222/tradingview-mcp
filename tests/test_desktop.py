@@ -20,7 +20,8 @@ from tvmcp.config import Settings
 class FakePage:
     """Implements the DesktopPage interface the driver functions rely on."""
 
-    def __init__(self, symbol="OANDA:EURUSD", interval="1h", shapes=None):
+    def __init__(self, symbol="OANDA:EURUSD", interval="1h", shapes=None,
+                 studies=None):
         self.symbol = symbol
         self.interval = interval
         self.typed = []
@@ -29,10 +30,39 @@ class FakePage:
         self.exprs = []
         # id -> {"name": ..., "points": [...], "text": ...}
         self.shapes = shapes if shapes is not None else {}
+        # [{"id": ..., "title": ..., "plots": [...], "rows": [...], "boxes": [...]}]
+        self.studies = studies if studies is not None else []
+        self.study_payloads = []
         self._next_id = 0
 
     def eval(self, expr, await_promise=False):
         self.exprs.append(expr)
+        if "/*tvmcp:studies*/" in expr:
+            return {
+                "symbol": self.symbol,
+                "resolution": "60",
+                "studies": self.studies,
+            }
+        if "/*tvmcp:plots*/" in expr or "/*tvmcp:graphics*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.study_payloads.append(payload)
+            q = payload["query"]
+            matches = [s for s in self.studies
+                       if s["id"] == q or q.lower() in s["title"].lower()]
+            if len(matches) != 1:
+                return {"__miss": True, "not_found": not matches,
+                        "candidates": [{"id": s["id"], "title": s["title"]}
+                                       for s in self.studies]}
+            s = matches[0]
+            if "/*tvmcp:plots*/" in expr:
+                return {"id": s["id"], "title": s["title"],
+                        "plots": s.get("plots", []),
+                        "columns": ["time", "plot_0"],
+                        "total_bars": 400,
+                        "rows": s.get("rows", [])[-payload["count"]:]}
+            return {"id": s["id"], "title": s["title"],
+                    "counts": {"boxes": len(s.get("boxes", []))},
+                    "boxes": s.get("boxes", [])[-payload["limit"]:]}
         if "/*tvmcp:list*/" in expr:
             return {
                 "symbol": self.symbol,
@@ -131,13 +161,16 @@ def test_gating_off_by_default(tmp_path):
     assert not any(n.startswith("tv_desktop_") for n in names)
 
 
-def test_registers_seven_tools(tmp_path):
+def test_registers_ten_tools(tmp_path):
     mcp, _ = _build(tmp_path)
     names = {t.name for t in asyncio.run(mcp.list_tools())}
     assert names == {
         "tv_desktop_status",
         "tv_desktop_screenshot",
         "tv_desktop_list_drawings",
+        "tv_desktop_list_studies",
+        "tv_desktop_read_study_plots",
+        "tv_desktop_read_study_graphics",
         "tv_desktop_set_symbol",
         "tv_desktop_set_timeframe",
         "tv_desktop_draw",
@@ -152,6 +185,9 @@ def test_read_only_excludes_navigation_and_writes(tmp_path):
         "tv_desktop_status",
         "tv_desktop_screenshot",
         "tv_desktop_list_drawings",
+        "tv_desktop_list_studies",
+        "tv_desktop_read_study_plots",
+        "tv_desktop_read_study_graphics",
     }
 
 
@@ -274,6 +310,74 @@ def test_remove_unknown_id_raises(tmp_path):
     mcp, _ = _build(tmp_path)
     with pytest.raises(ToolError, match="No drawing with id"):
         asyncio.run(mcp.call_tool("tv_desktop_remove_drawing", {"drawing_id": "nope"}))
+
+
+_LUX = {
+    "id": "lux1",
+    "title": "Imbalance Detector [LuxAlgo]",
+    "plots": [{"id": "plot_0", "type": "alertcondition", "title": "Bullish FVG"}],
+    "rows": [[1787810400, 0], [1787814000, 1], [1787817600, 0]],
+    "boxes": [
+        {"id": 1, "time1": 1787745600, "time2": 1787752800,
+         "price1": 1.16556, "price2": 1.16534, "text": None, "extend": "n",
+         "bg_color": {"hex": "#0011ff", "alpha": 0.2}, "border_color": None},
+    ],
+}
+_WF = {"id": "wf1", "title": "Williams Fractals", "plots": [], "rows": []}
+
+
+def test_list_studies_returns_chart_and_studies(tmp_path):
+    page = FakePage(studies=[_LUX, _WF])
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_list_studies")
+    assert data["provider"] == "desktop"
+    assert data["symbol"] == "OANDA:EURUSD"
+    assert [s["id"] for s in data["studies"]] == ["lux1", "wf1"]
+
+
+def test_read_study_plots_by_title_substring(tmp_path):
+    page = FakePage(studies=[_LUX, _WF])
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_read_study_plots",
+                 {"study": "imbalance", "count": 2})
+    assert data["id"] == "lux1"
+    assert data["rows"] == [[1787814000, 1], [1787817600, 0]]
+    assert page.study_payloads[-1] == {
+        "query": "imbalance", "count": 2, "nonempty_only": False}
+
+
+def test_read_study_graphics_passes_limit_and_kinds(tmp_path):
+    page = FakePage(studies=[_LUX])
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_read_study_graphics",
+                 {"study": "lux1", "limit": 10, "kinds": ["boxes"]})
+    assert data["counts"]["boxes"] == 1
+    assert data["boxes"][0]["price1"] == 1.16556
+    assert page.study_payloads[-1] == {
+        "query": "lux1", "limit": 10, "kinds": ["boxes"]}
+
+
+def test_study_query_miss_raises_with_candidates(tmp_path):
+    page = FakePage(studies=[_LUX, _WF])
+    mcp, _ = _build(tmp_path, page)
+    with pytest.raises(ToolError, match="matches no study.*Imbalance"):
+        asyncio.run(mcp.call_tool("tv_desktop_read_study_plots",
+                                  {"study": "nope"}))
+
+
+def test_study_query_ambiguous_raises(tmp_path):
+    page = FakePage(studies=[_LUX, _WF])
+    mcp, _ = _build(tmp_path, page)
+    with pytest.raises(ToolError, match="ambiguous"):
+        asyncio.run(mcp.call_tool("tv_desktop_read_study_graphics",
+                                  {"study": "i"}))
+
+
+def test_read_study_plots_count_bounds(tmp_path):
+    mcp, _ = _build(tmp_path, FakePage(studies=[_LUX]))
+    with pytest.raises(Exception):
+        asyncio.run(mcp.call_tool("tv_desktop_read_study_plots",
+                                  {"study": "lux1", "count": 0}))
 
 
 def test_timeframe_map_covers_all_canonicals():

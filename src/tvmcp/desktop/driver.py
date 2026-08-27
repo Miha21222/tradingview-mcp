@@ -360,3 +360,266 @@ def remove_drawing(page, drawing_id: str) -> dict:
             "ids with tv_desktop_list_drawings."
         )
     return res
+
+
+# --- studies (read the user's indicators; in-page study model) ---------------
+#
+# `getStudyById(id)` returns the charting-library IStudyApi; its private
+# `_study` is the study model with `data()` (plot-value series, rows
+# `[unix_time, plot0, plot1, ...]`) and `graphics()._primitivesCollection`
+# (Pine box.new/line.new/label.new output). Verified live 2026-08-27.
+# Landmines:
+# (1) protected/invite-only Pine scripts carry their encrypted source as a
+#     multi-KB hidden `text` input - inputs MUST be filtered to visible ones
+#     and value strings capped, or one study blows the output budget;
+# (2) dwg* collections nest as Map(name -> Map(? -> store)); the store's
+#     `_primitivesDataById` Map holds the primitive dicts (box: x1/x2 bar
+#     index, y1/y2 price; colors packed as ARGB uint32);
+# (3) box/line x coordinates are SERVER-side graphic indexes, not client bar
+#     indexes: `graphics()._indexes[x]` translates them to the client bar
+#     index (-2000000 = before loaded history), and
+#     `series().bars().valueAt(ti)[0]` gives the unix time; indexes with no
+#     mapping are extrapolated from the tail offset + bar spacing
+#     (approximate across session gaps);
+# (4) plot rows hold NaN for empty values - CDP's returnByValue JSON-drops
+#     NaN, so the JS maps non-finite to null explicitly.
+
+# Shared JS helpers injected into every study block: study lookup by id or
+# case-insensitive title substring, and packed-ARGB -> {hex, alpha} color.
+_STUDY_HELPERS_JS = """
+  const ch = window.TradingViewApi.activeChart();
+  const findStudy = (q) => {
+    const all = ch.getAllStudies();
+    let m = all.filter(s => s.id === q);
+    if (!m.length)
+      m = all.filter(s => (s.name || '').toLowerCase().includes(q.toLowerCase()));
+    if (m.length === 1) return m[0];
+    return {__miss: true, not_found: !m.length,
+            candidates: all.map(s => ({id: s.id, title: s.name}))};
+  };
+  const color = (v) => {
+    if (v == null || typeof v !== 'number') return null;
+    const a = (v >>> 24) & 255, r = (v >>> 16) & 255,
+          g = (v >>> 8) & 255, b = v & 255;
+    if (!a) return null;  // zero alpha = theme palette index, not a packed ARGB
+    const hex = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    return {hex: hex, alpha: Math.round((a / 255) * 100) / 100};
+  };
+  const fin = (x) => (typeof x === 'number' && Number.isFinite(x)) ? x : null;
+"""
+
+_LIST_STUDIES_JS = """
+/*tvmcp:studies*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  __HELPERS__
+  const out = {symbol: ch.symbol(), resolution: ch.resolution(), studies: []};
+  for (const s of ch.getAllStudies()) {
+    const st = {id: s.id, title: s.name};
+    try {
+      const api = ch.getStudyById(s.id);
+      st.visible = api.isVisible();
+      st.pane = api.paneIndex();
+      st.loading = api.isLoading();
+      st.error = api.hasError();
+      st.bars = api.dataLength();
+      const model = api._study;
+      const mi = model.metaInfo();
+      const styles = mi.styles || {};
+      st.plots = (mi.plots || []).map(p => ({
+        id: p.id, type: p.type,
+        title: (styles[p.id] && styles[p.id].title) || null,
+      }));
+      const vals = {};
+      for (const v of api.getInputValues()) vals[v.id] = v.value;
+      if (vals.pineId) st.pine_id = String(vals.pineId).slice(0, 80);
+      const skip = {text: 1, pineId: 1, pineVersion: 1, pineFeatures: 1,
+                    __profile: 1};
+      st.inputs = api.getInputsInfo()
+        .filter(i => !i.isHidden && !i.isFake && !skip[i.id])
+        .map(i => {
+          let v = vals[i.id];
+          if (typeof v === 'string' && v.length > 200) v = v.slice(0, 200);
+          return {id: i.id, name: i.name, type: i.type, value: fin(v) ?? v ?? null};
+        });
+      const counts = {};
+      const countStore = (v, depth) => {
+        if (!v || depth > 3) return 0;
+        if (v._primitivesDataById instanceof Map) return v._primitivesDataById.size;
+        if (v instanceof Map) {
+          let n = 0;
+          for (const x of v.values()) n += countStore(x, depth + 1);
+          return n;
+        }
+        if (Array.isArray(v)) return v.length;
+        return 0;
+      };
+      const pc = model.graphics()._primitivesCollection;
+      for (const k of Object.keys(pc)) {
+        const n = countStore(pc[k], 0);
+        if (n) counts[k.replace(/^dwg/, '')] = n;
+      }
+      st.graphics = counts;
+    } catch (e) { st.read_error = String(e).slice(0, 200); }
+    out.studies.push(st);
+  }
+  return out;
+})()
+"""
+
+_READ_PLOTS_JS = """
+/*tvmcp:plots*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  __HELPERS__
+  const p = __PAYLOAD__;
+  const s = findStudy(p.query);
+  if (s.__miss) return s;
+  const api = ch.getStudyById(s.id);
+  const mi = api._study.metaInfo();
+  const styles = mi.styles || {};
+  const d = api._study.data();
+  if (d.isEmpty()) return {id: s.id, title: s.name, rows: [], plots: [],
+                           note: 'study has no data - hidden studies are ' +
+                                 'unloaded by TV; toggle it visible and retry'};
+  const li = d.lastIndex(), fi = d.firstIndex();
+  const from = Math.max(fi, li - p.count + 1);
+  const rows = [];
+  for (let i = from; i <= li; i++) {
+    const v = d.valueAt(i);
+    if (!v) continue;
+    const vals = Array.from(v).slice(1).map(fin);
+    if (p.nonempty_only && !vals.some(x => x !== null)) continue;
+    rows.push([v[0], ...vals]);
+  }
+  return {
+    id: s.id, title: s.name,
+    plots: (mi.plots || []).map(pl => ({
+      id: pl.id, type: pl.type,
+      title: (styles[pl.id] && styles[pl.id].title) || null,
+    })),
+    columns: ['time', ...(mi.plots || []).map(pl => pl.id)],
+    total_bars: d.size(),
+    rows: rows,
+  };
+})()
+"""
+
+_READ_GRAPHICS_JS = """
+/*tvmcp:graphics*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  __HELPERS__
+  const p = __PAYLOAD__;
+  const s = findStudy(p.query);
+  if (s.__miss) return s;
+  const model = ch.getStudyById(s.id)._study;
+  let t = () => null, timeErr = null;
+  try {
+    const idx = model.graphics()._indexes;
+    const bars = model.series().bars();
+    const bfi = bars.firstIndex(), bli = bars.lastIndex();
+    let span = 60;
+    if (bli > bfi) {
+      const a = bars.valueAt(bli), b = bars.valueAt(bli - 1);
+      if (a && b) span = a[0] - b[0];
+    }
+    const lastX = idx.length - 1;
+    const offset = (lastX >= 0 && idx[lastX] > -2000000) ? lastX - idx[lastX] : null;
+    t = (x) => {
+      if (x == null) return null;
+      const ti = (x >= 0 && x < idx.length) ? idx[x] : null;
+      if (ti != null && ti > -2000000) {
+        const v = bars.valueAt(ti);
+        if (v) return v[0];
+      }
+      if (offset === null) return null;
+      const ref = bars.valueAt(bfi);
+      return ref ? ref[0] + ((x - offset) - bfi) * span : null;
+    };
+  } catch (e) { timeErr = String(e); }
+  const stores = (coll) => {
+    const found = [];
+    const walk = (v, depth) => {
+      if (!v || depth > 3) return;
+      if (v._primitivesDataById instanceof Map) { found.push(v._primitivesDataById); return; }
+      if (v instanceof Map) for (const x of v.values()) walk(x, depth + 1);
+    };
+    walk(coll, 0);
+    return found;
+  };
+  const pc = model.graphics()._primitivesCollection;
+  const out = {id: s.id, title: s.name, counts: {}};
+  if (timeErr) out.time_mapping_error = timeErr;
+  const kinds = p.kinds;
+  const take = (name, coll, map) => {
+    if (kinds && !kinds.includes(name)) return;
+    let items = [];
+    for (const st of stores(coll)) items.push(...st.values());
+    out.counts[name] = items.length;
+    items.sort((a, b) => (a.id || 0) - (b.id || 0));
+    out[name] = items.slice(-p.limit).map(map);
+  };
+  take('boxes', pc.dwgboxes, (b) => ({
+    id: b.id, time1: t(b.x1), time2: t(b.x2),
+    price1: fin(b.y1), price2: fin(b.y2),
+    text: b.t || null, extend: b.ex || null,
+    bg_color: color(b.bc), border_color: color(b.c),
+  }));
+  take('lines', pc.dwglines, (l) => ({
+    id: l.id, time1: t(l.x1), price1: fin(l.y1),
+    time2: t(l.x2), price2: fin(l.y2),
+    extend: l.ex || null, color: color(l.ci), width: l.w ?? null,
+  }));
+  take('labels', pc.dwglabels, (l) => ({
+    id: l.id, time: t(l.x), price: fin(l.y),
+    text: (l.t || '').slice(0, 200) || null, color: color(l.ci ?? l.c),
+  }));
+  take('polylines', pc.dwgpolylines, (l) => ({
+    id: l.id,
+    points: (l.points || []).slice(0, 50).map(pt => ({time: t(pt.x), price: fin(pt.y)})),
+    color: color(l.ci ?? l.c),
+  }));
+  return out;
+})()
+"""
+
+
+def _study_js(template: str, payload: dict | None = None) -> str:
+    js = template.replace("__HELPERS__", _STUDY_HELPERS_JS)
+    if payload is not None:
+        js = js.replace("__PAYLOAD__", json.dumps(payload))
+    return js
+
+
+def _check_study_res(res, query: str | None = None):
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    if res.get("__miss"):
+        cands = ", ".join(f"{c['id']} ({c['title']})" for c in res.get("candidates", []))
+        reason = "matches no study" if res.get("not_found") else "is ambiguous"
+        raise ToolError(
+            f"Study query {query!r} {reason} on the active chart. "
+            f"Studies present: {cands or 'none'}. Pass an id or a more "
+            "specific title substring (see tv_desktop_list_studies)."
+        )
+    return res
+
+
+def list_studies(page) -> dict:
+    return _check_study_res(page.eval(_study_js(_LIST_STUDIES_JS)))
+
+
+def read_study_plots(page, query: str, count: int, nonempty_only: bool) -> dict:
+    res = page.eval(_study_js(
+        _READ_PLOTS_JS,
+        {"query": query, "count": count, "nonempty_only": nonempty_only},
+    ))
+    return _check_study_res(res, query)
+
+
+def read_study_graphics(page, query: str, limit: int, kinds: list[str] | None) -> dict:
+    res = page.eval(_study_js(
+        _READ_GRAPHICS_JS, {"query": query, "limit": limit, "kinds": kinds},
+    ))
+    return _check_study_res(res, query)

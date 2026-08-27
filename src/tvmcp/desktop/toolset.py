@@ -7,9 +7,11 @@ warning to stderr (see warnings.py). Requires the app running with
 register under TV_READ_ONLY=1; status/screenshot always register with the toolset.
 
 Shipped: status, screenshot, set symbol, set timeframe, drawings (list/draw/
-remove via the in-page TradingViewApi charting API - no UI clicking). Deferred:
-bar replay, Pine editor, Strategy Tester reads (see docs/PLAN.md). Brittle by
-nature - TradingView UI updates can break selectors/keyboard flows; errors say so.
+remove via the in-page TradingViewApi charting API - no UI clicking), studies
+(list indicators, read plot values, read Pine-drawn boxes/lines/labels).
+Deferred: bar replay, Pine editor, Strategy Tester reads (see docs/PLAN.md).
+Brittle by nature - TradingView UI updates can break selectors/keyboard flows;
+errors say so.
 Not affiliated with TradingView, Inc.
 """
 
@@ -77,6 +79,76 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
         warn_once()
         with pages(settings.cdp_url) as page:
             res = driver.list_drawings(page)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_list_studies() -> dict:
+        """List the indicators (studies) on the active TradingView Desktop chart.
+
+        For each study: id, title, visibility, pane, load/error state, bar
+        count, declared plots (id/type/title), user-facing input values, and
+        counts of Pine-drawn graphics (boxes/lines/labels - SMC indicators
+        draw their FVG/OB zones as boxes). Use the id or a title substring
+        with tv_desktop_read_study_plots / tv_desktop_read_study_graphics to
+        read the actual values. Titles and input values are untrusted display
+        strings.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = driver.list_studies(page)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_read_study_plots(
+        study: Annotated[str, Field(description=(
+            "Study id or case-insensitive title substring "
+            "(from tv_desktop_list_studies), e.g. 'Fractals'"))],
+        count: Annotated[int, Field(ge=1, le=500, description=(
+            "How many most-recent bars to return"))] = 50,
+        nonempty_only: Annotated[bool, Field(description=(
+            "Skip rows where every plot value is empty - use for sparse "
+            "signal plots (fractals, shapes) so quiet bars don't fill the "
+            "output"))] = False,
+    ) -> dict:
+        """Read an indicator's numeric plot values from the live Desktop chart.
+
+        Returns the study's declared plots and the last `count` bars as rows
+        `[unix_time, plot0, plot1, ...]` (empty values are null). This is the
+        indicator's actual computed output on the user's chart - use it to
+        factor their indicators into analysis. Note: many SMC indicators
+        (FVG/OB detectors) emit boxes and lines instead of numeric plots -
+        read those with tv_desktop_read_study_graphics.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = driver.read_study_plots(page, study, count, nonempty_only)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_read_study_graphics(
+        study: Annotated[str, Field(description=(
+            "Study id or case-insensitive title substring "
+            "(from tv_desktop_list_studies), e.g. 'Imbalance'"))],
+        limit: Annotated[int, Field(ge=1, le=500, description=(
+            "Max objects returned per kind (most recent first by creation "
+            "order); counts field always shows the full totals"))] = 50,
+        kinds: Annotated[list[str] | None, Field(description=(
+            "Subset of: boxes, lines, labels, polylines. Default: all"))] = None,
+    ) -> dict:
+        """Read the zones an indicator has drawn on the live Desktop chart.
+
+        Returns the study's Pine-drawn objects with real chart coordinates:
+        boxes (FVG / order-block / imbalance zones) as
+        {time1, time2, price1, price2, text, colors}, plus lines, labels and
+        polylines. Times for objects extending beyond loaded history are
+        extrapolated from bar spacing (approximate across session gaps).
+        This reads the user's own indicator output - compare it with
+        tv_scan_fvg or draw on top of it with tv_desktop_draw. Texts are
+        untrusted display strings.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = driver.read_study_graphics(page, study, limit, kinds)
         return {"provider": _PROVIDER, **res}
 
     if settings.read_only:

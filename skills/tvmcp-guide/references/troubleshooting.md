@@ -86,6 +86,10 @@ commands. This table covers everything else, per toolset.
 | Tools broke after a TradingView update | UI selectors/keyboard flows changed | Known brittleness of the desktop tier; report it — the driver lives in `src/tvmcp/desktop/driver.py` |
 | tv_desktop_draw errors "no new drawing appeared" | Shape kind unsupported by this app build, or `getAllShapes()` lag (the draw JS polls ~2s) | Try another kind; verify with `tv_desktop_screenshot` — the shape may exist despite the error, so `tv_desktop_list_drawings` before retrying (avoids phantom duplicates) |
 | tv_desktop_draw "page does not expose TradingViewApi" | Chart still loading, or a non-chart tab won target selection | Wait for the chart to render and retry |
+| tv_desktop_read_study_plots: "study has no data" | The study is hidden (eye toggled off) — TV unloads hidden studies | Ask the user to toggle it visible, then retry |
+| Study query "matches no study" / "is ambiguous" | Wrong id or too-loose title substring | The error lists all present studies; use `tv_desktop_list_studies` and pass the id or a longer substring |
+| read_study_graphics times look off for old objects | Objects before loaded history get extrapolated times (bar-spacing based, session gaps ignored) | Scroll the chart left to load more history, or treat pre-history times as approximate |
+| read_study_graphics empty for an indicator that clearly plots | Indicator uses plot()/plotshape(), not Pine box/line/label objects | Use `tv_desktop_read_study_plots` (with `nonempty_only=true` for sparse signals) |
 
 ## Everywhere
 
