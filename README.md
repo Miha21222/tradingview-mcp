@@ -6,7 +6,16 @@ MCP server giving AI agents a TradingView-centric trading toolkit: screener quer
 
 ## Status
 
-M0-M5 complete: server boots with `public`/`data` defaults; opt-in toolsets for SMC scanning, chart rendering, backtesting, FX Replay journal sync, TradingView-account data (`session`), Pine compile, Desktop CDP, and declarative strategies. Ships a `tv` CLI (every tool = a subcommand emitting JSON), 8 companion skills, and a validated Claude Code plugin manifest. Open items: M1's trust gate still awaits the owner's real hand-labeled SMC setups; webhook receiver, MCP Apps, and the sandboxed Python strategy escape hatch are deferred. Roadmap: `docs/PLAN.md`.
+M0-M5 complete: server boots with `public`/`data` defaults; opt-in toolsets for SMC scanning, chart rendering, backtesting, FX Replay journal sync, TradingView-account data (`session`), Pine compile, Desktop CDP (screenshots, navigation, drawing on the live chart, reading the user's own indicators — plot values and Pine-drawn FVG/OB zones), and declarative strategies. Ships a `tv` CLI (every tool = a subcommand emitting JSON), 10 companion skills, and a validated Claude Code plugin manifest. Open items: M1's trust gate still awaits the owner's real hand-labeled SMC setups; webhook receiver, MCP Apps, and the sandboxed Python strategy escape hatch are deferred. Roadmap: `docs/PLAN.md`.
+
+## Install as a Claude Code plugin
+
+```
+/plugin marketplace add Miha21222/tradingview-mcp
+/plugin install tradingview-mcp@tradingview-mcp-marketplace
+```
+
+The install prompts for optional credentials (OANDA practice key, TradingView `sessionid`) and operator settings (`TV_TOOLSETS`, `TV_READ_ONLY`, ...) — nothing is required for the default `public,data` surface, which works with zero TradingView account. Requires [uv](https://docs.astral.sh/uv/) on PATH.
 
 ## Quick start
 
@@ -42,4 +51,8 @@ Run `uv run tv tv_setup_doctor` to check every prerequisite - each broken check 
 
 ## TradingView Terms of Service
 
-The default toolsets use no TradingView account: the `public` toolset talks to TradingView's public scanner endpoint, and market data comes from Dukascopy/OANDA. TradingView's ToS prohibits automated data collection and non-display use of its data; the optional `session` and `desktop` toolsets (off by default) interact with **your own** TradingView account/desktop app at **your own risk** — enabling them is your explicit choice and may violate TradingView's ToS and risk account restrictions. The `session` toolset prints a ToS/ban warning to stderr on first use and requires `TV_SESSIONID`. This project is for personal research/education.
+The default toolsets use no TradingView account: the `public` toolset talks to TradingView's public scanner endpoint, and market data comes from Dukascopy/OANDA. TradingView's ToS prohibits automated data collection and non-display use of its data; the optional `session` and `desktop` toolsets (off by default) interact with **your own** TradingView account/desktop app at **your own risk** — enabling them is your explicit choice and may violate TradingView's ToS and risk account restrictions. Both print a ToS/ban warning to stderr on first use. This project is for personal research/education.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Not affiliated with TradingView, Inc.; protected/invite-only Pine scripts remain their authors' property — the study tools read only the rendered output of indicators on your own chart, never their source.
