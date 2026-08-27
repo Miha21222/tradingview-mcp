@@ -4,9 +4,9 @@
 #
 # Usage:  powershell -File scripts\start-tv-desktop.ps1 [-Port 9223]
 #
-# Default port is 9223 (NOT the conventional 9222): on this machine wmux's
-# browser panel already listens on 9222, and Chromium silently skips binding a
-# busy port - the app then runs with no CDP at all. Set TV_CDP_URL to match.
+# Default port is 9223 (NOT the conventional 9222): other CDP tools commonly
+# listen on 9222 already, and Chromium silently skips binding a busy port - the
+# app then runs with no CDP at all. Set TV_CDP_URL to match.
 
 param([int]$Port = 9223)
 

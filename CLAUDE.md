@@ -2,7 +2,7 @@
 
 TradingView MCP server for AI agents: market data, SMC/ICT pattern scanning, chart rendering with markup, backtesting, Pine tooling — shipped as a Claude Code plugin with companion skills.
 
-**Read `docs/PLAN.md` before doing anything substantive.** It holds the full architecture, the milestone tracker (M0–M5), and the design decisions with their rationale. Deep research behind the design lives in the owner's Obsidian vault: `C:\Users\Admin\Documents\Obsidian Notes\Trading\Trading Strategy Assistant\07 - TradingView MCP - исследование и дизайн.md` (Russian).
+**Read `docs/PLAN.md` before doing anything substantive.** It holds the full architecture, the milestone tracker (M0–M5), and the design decisions with their rationale. The deep research behind the design lives in the owner's private notes (not in this repo).
 
 ## Current status
 

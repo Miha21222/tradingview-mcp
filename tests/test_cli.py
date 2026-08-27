@@ -3,18 +3,21 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from fastmcp.exceptions import ToolError
 
 from tvmcp.cli import _parse_args
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def _run_cli(*args, env=None):
     return subprocess.run(
         [sys.executable, "-m", "tvmcp.cli", *args],
         capture_output=True, text=True, env=env,
-        cwd="C:/Users/Admin/Projects/tradingview-mcp",
+        cwd=_REPO_ROOT,
     )
 
 
