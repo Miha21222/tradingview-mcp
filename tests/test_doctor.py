@@ -73,6 +73,34 @@ def test_set_credentials_report_ok(tmp_path):
     assert by_name["tv_session"]["ok"] is True
 
 
+def test_cdp_down_app_running_says_close_first(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "_tv_desktop_running", lambda: True)
+    data = _run(tmp_path)
+    c = {ch["name"]: ch for ch in data["checks"]}["desktop_cdp"]
+    assert c["ok"] is False
+    assert "without the debug flag" in c["detail"]
+    assert "ask the user" in c["fix"].lower()
+    assert "Stop-Process" in c["fix"]
+
+
+def test_cdp_down_app_absent_plain_launch_fix(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "_tv_desktop_running", lambda: False)
+    data = _run(tmp_path)
+    c = {ch["name"]: ch for ch in data["checks"]}["desktop_cdp"]
+    assert c["ok"] is False
+    assert "Stop-Process" not in c["fix"]
+    assert "start-tv-desktop.ps1" in c["fix"]
+
+
+def test_cdp_fix_uses_absolute_launcher_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(doctor, "_tv_desktop_running", lambda: False)
+    data = _run(tmp_path)
+    c = {ch["name"]: ch for ch in data["checks"]}["desktop_cdp"]
+    # repo checkout: the launcher exists, so the fix must carry its absolute path
+    from pathlib import Path
+    assert Path(c["fix"].split('"')[1]).is_absolute()
+
+
 def test_dirs_reported_with_mkdir_fix(tmp_path):
     data = _run(tmp_path)
     by_name = {c["name"]: c for c in data["checks"]}

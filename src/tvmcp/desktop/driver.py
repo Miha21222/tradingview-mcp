@@ -81,10 +81,11 @@ class DesktopPage:
     def __init__(self, cdp: _Cdp):
         self._cdp = cdp
 
-    def eval(self, expr: str):
-        res = self._cdp.call(
-            "Runtime.evaluate", {"expression": expr, "returnByValue": True}
-        )
+    def eval(self, expr: str, await_promise: bool = False):
+        params = {"expression": expr, "returnByValue": True}
+        if await_promise:
+            params["awaitPromise"] = True
+        res = self._cdp.call("Runtime.evaluate", params)
         return res.get("result", {}).get("value")
 
     def type_text(self, text: str) -> None:
@@ -193,3 +194,169 @@ def set_timeframe(page, canonical_tf: str) -> dict:
     page.press("Enter")
     time.sleep(1.0)
     return read_status(page)
+
+
+# --- drawings (via the in-page charting-library API, not UI clicks) ---------
+#
+# TradingView Desktop exposes `window.TradingViewApi` with the charting-library
+# chart API (createShape/createMultipointShape/getAllShapes/removeEntity) -
+# verified live 2026-08-26. Shape ids returned by create* are opaque objects
+# that don't survive `returnByValue`, so every mutation runs as one atomic JS
+# block that diffs getAllShapes() before/after and returns plain string ids.
+# `exportData` is NOT supported in the desktop build - price anchors come from
+# the pane's price scale instead.
+
+# kind -> (TV shape name, required point count)
+DRAW_KINDS = {
+    "rectangle": 2,        # FVG / order block / range box
+    "trend_line": 2,
+    "ray": 2,
+    "horizontal_line": 1,  # level; time optional (viewport middle)
+    "vertical_line": 1,    # time marker; price optional
+    "text": 1,             # floating label
+}
+
+_NO_API = (
+    "This TradingView Desktop page does not expose TradingViewApi (chart still "
+    "loading, or a non-chart tab won). Wait for the chart to render and retry; "
+    "if it persists, the app build changed and the drawing slice needs rework."
+)
+
+_LIST_JS = """
+/*tvmcp:list*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  const ch = window.TradingViewApi.activeChart();
+  const out = {
+    symbol: ch.symbol(),
+    resolution: ch.resolution(),
+    visible_time_range: ch.getVisibleRange(),
+    visible_price_range: null,
+  };
+  try {
+    out.visible_price_range =
+      ch.getPanes()[0].getMainSourcePriceScale().getVisiblePriceRange();
+  } catch (e) {}
+  out.shapes = ch.getAllShapes().map(s => {
+    let points = null, text = null;
+    try { points = ch.getShapeById(s.id).getPoints(); } catch (e) {}
+    try { text = ch.getShapeById(s.id).getProperties().text || null; } catch (e) {}
+    return {id: s.id, name: s.name, points: points, text: text};
+  });
+  return out;
+})()
+"""
+
+_DRAW_JS = """
+/*tvmcp:draw*/
+(new Promise(async (resolve) => {
+  if (!window.TradingViewApi) return resolve({no_api: true});
+  const p = __PAYLOAD__;
+  const ch = window.TradingViewApi.activeChart();
+  const vr = ch.getVisibleRange();
+  let midPrice = null;
+  try {
+    const pr = ch.getPanes()[0].getMainSourcePriceScale().getVisiblePriceRange();
+    if (pr) midPrice = (pr.from + pr.to) / 2;
+  } catch (e) {}
+  const pts = p.points.map(pt => ({
+    time: pt.time != null ? pt.time : Math.round((vr.from + vr.to) / 2),
+    price: pt.price != null ? pt.price : midPrice,
+  }));
+  if (pts.some(pt => pt.price == null))
+    return resolve({error: 'price omitted but the pane price scale is unavailable'});
+  const before = new Set(ch.getAllShapes().map(s => s.id));
+  const opts = {shape: p.shape, lock: p.lock, disableSelection: false,
+                overrides: p.overrides};
+  if (p.text) opts.text = p.text;
+  try {
+    if (pts.length === 1) ch.createShape(pts[0], opts);
+    else ch.createMultipointShape(pts, opts);
+  } catch (e) { return resolve({error: String(e)}); }
+  // getAllShapes lags creation by a tick in the desktop build - poll for the new id
+  for (let i = 0; i < 20; i++) {
+    const created = ch.getAllShapes().filter(s => !before.has(s.id));
+    if (created.length)
+      return resolve({created: created.map(s => ({id: s.id, name: s.name})),
+                      points: pts});
+    await new Promise(r => setTimeout(r, 100));
+  }
+  resolve({created: [], points: pts});
+}))
+"""
+
+_REMOVE_JS = """
+/*tvmcp:remove*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  const ch = window.TradingViewApi.activeChart();
+  const target = ch.getAllShapes().find(s => s.id === __ID__);
+  if (!target) return {found: false, present: ch.getAllShapes().map(s => s.id)};
+  let text = null;
+  try { text = ch.getShapeById(target.id).getProperties().text || null; } catch (e) {}
+  ch.removeEntity(target.id);
+  return {found: true, id: target.id, name: target.name, text: text};
+})()
+"""
+
+
+def _hex_to_rgba(color: str, opacity: float) -> str:
+    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({r},{g},{b},{opacity})"
+
+
+def _overrides(kind: str, color: str, fill_opacity: float) -> dict:
+    if kind == "rectangle":
+        return {
+            "color": color,
+            "backgroundColor": _hex_to_rgba(color, fill_opacity),
+            "fillBackground": True,
+            "linewidth": 1,
+        }
+    if kind == "text":
+        return {"color": color}
+    width = 2 if kind in ("trend_line", "ray") else 1
+    return {"linecolor": color, "linewidth": width}
+
+
+def list_drawings(page) -> dict:
+    res = page.eval(_LIST_JS)
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    return res
+
+
+def draw(page, kind: str, points: list[dict], text: str | None,
+         color: str, fill_opacity: float, lock: bool) -> dict:
+    payload = {
+        "shape": kind,
+        "points": [{"time": p.get("time"), "price": p.get("price")} for p in points],
+        "text": text,
+        "lock": lock,
+        "overrides": _overrides(kind, color, fill_opacity),
+    }
+    res = page.eval(_DRAW_JS.replace("__PAYLOAD__", json.dumps(payload)),
+                    await_promise=True)
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    if res.get("error"):
+        raise ToolError(f"Drawing failed: {res['error']}")
+    if not res.get("created"):
+        raise ToolError(
+            "TradingView accepted the call but no new drawing appeared - the "
+            "shape kind may be unsupported by this app build; try another kind "
+            "or verify with tv_desktop_screenshot."
+        )
+    return res
+
+
+def remove_drawing(page, drawing_id: str) -> dict:
+    res = page.eval(_REMOVE_JS.replace("__ID__", json.dumps(drawing_id)))
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    if not res.get("found"):
+        raise ToolError(
+            f"No drawing with id {drawing_id!r} on the active chart. List current "
+            "ids with tv_desktop_list_drawings."
+        )
+    return res

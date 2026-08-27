@@ -14,6 +14,9 @@ itself before anything else works.
 from __future__ import annotations
 
 import shutil
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -103,10 +106,32 @@ def _session_check(settings: Settings) -> dict:
     )
 
 
+def _tv_desktop_running() -> bool:
+    """Whether a TradingView Desktop process exists (Windows only; False elsewhere)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq TradingView.exe", "/NH"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        return "TradingView.exe" in out
+    except Exception:
+        return False
+
+
+def _launcher_path() -> str:
+    """Absolute path to the desktop launcher when findable (relative breaks off-repo cwd)."""
+    p = Path(__file__).resolve().parents[2] / "scripts" / "start-tv-desktop.ps1"
+    return str(p) if p.exists() else "scripts/start-tv-desktop.ps1"
+
+
 def _cdp_check(settings: Settings) -> dict:
     # A 200 from /json/version is NOT enough: any CDP-speaking app (another
     # Electron tool, a debug browser) could own the port. Only a chart tab in
     # /json/list proves it is TradingView Desktop.
+    launcher = _launcher_path()
+    fix = f'powershell -File "{launcher}"   (then set TV_CDP_URL=http://127.0.0.1:9223)'
     try:
         r = httpx.get(settings.cdp_url.rstrip("/") + "/json/list", timeout=2)
         r.raise_for_status()
@@ -122,12 +147,27 @@ def _cdp_check(settings: Settings) -> dict:
         )
     except Exception:
         ok = False
-        detail = f"no CDP listener at {settings.cdp_url} - `desktop` toolset unavailable"
+        if _tv_desktop_running():
+            # Single-instance app: a plain relaunch only focuses the flagless
+            # copy, so it has to be closed before the flagged relaunch.
+            detail = (
+                f"no CDP listener at {settings.cdp_url}, but TradingView Desktop IS "
+                "running - it was started without the debug flag. Close it and "
+                "relaunch via the script. Closing it interrupts the user: confirm "
+                "with them first (the layout autosaves)."
+            )
+            fix = (
+                "Stop-Process -Name TradingView -Force; Start-Sleep 3; "
+                f'powershell -File "{launcher}"   '
+                "(ask the user before running - closes their TradingView)"
+            )
+        else:
+            detail = f"no CDP listener at {settings.cdp_url} - `desktop` toolset unavailable"
     return _check(
         "desktop_cdp",
         ok,
         detail,
-        fix="powershell -File scripts/start-tv-desktop.ps1   (then set TV_CDP_URL=http://127.0.0.1:9223)",
+        fix=fix,
         optional=True,
     )
 

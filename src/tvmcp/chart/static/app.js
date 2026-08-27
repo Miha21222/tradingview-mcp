@@ -27,6 +27,12 @@
     var p = function (n) { return String(n).padStart(2, "0"); };
     return p(d.getUTCHours()) + ":" + p(d.getUTCMinutes());
   }
+  function hexToRgba(hex, a) {
+    var r = parseInt(hex.slice(1, 3), 16);
+    var g = parseInt(hex.slice(3, 5), 16);
+    var b = parseInt(hex.slice(5, 7), 16);
+    return "rgba(" + r + "," + g + "," + b + "," + a + ")";
+  }
   function label(ov, x, y, text, color) {
     var d = document.createElement("div");
     d.style.position = "absolute";
@@ -109,15 +115,17 @@
         var yB = yOf(cs, Math.min(m.top, m.bottom));
         if (x1 == null || yT == null || yB == null) continue;
         var bull = m.direction === "bullish";
+        var boxColor = m.color || (bull ? "#26a69a" : "#ef5350");
         var d = document.createElement("div");
         d.style.position = "absolute";
         d.style.left = x1 + "px";
         d.style.width = Math.max(2, (x2 != null ? x2 : x1 + 15) - x1) + "px";
         d.style.top = yT + "px";
         d.style.height = Math.max(2, yB - yT) + "px";
-        d.style.background = bull ? "rgba(38,166,154,0.18)" : "rgba(239,83,80,0.18)";
-        d.style.border = bull ? "1px solid #26a69a" : "1px solid #ef5350";
+        d.style.background = hexToRgba(boxColor, 0.18);
+        d.style.border = "1px solid " + boxColor;
         ov.appendChild(d);
+        if (m.label) label(ov, x1 + 2, yT - 16, m.label, boxColor);
       } else if (m.type === "line" || m.type === "bos" || m.type === "choch") {
         var y = yOf(cs, m.level);
         if (y == null) continue;
@@ -128,24 +136,47 @@
         c1.style.width = (width - (lx != null ? lx : 0)) + "px";
         c1.style.top = y + "px";
         c1.style.height = "2px";
-        c1.style.background = m.type === "bos" ? "#1e88e5" : m.type === "choch" ? "#8e24aa" : "#333";
+        c1.style.background = m.color || (m.type === "bos" ? "#1e88e5" : m.type === "choch" ? "#8e24aa" : "#333");
         ov.appendChild(c1);
         if (m.label) label(ov, (lx != null ? lx : 0) + 4, y - 16, m.label, c1.style.background);
       } else if (m.type === "killzone") {
         var kx1 = xOf(chart, m.start);
         var kx2 = xOf(chart, m.end);
         if (kx1 == null) continue;
+        var kzColor = m.color || "#2196f3";
         var kd = document.createElement("div");
         kd.style.position = "absolute";
         kd.style.left = kx1 + "px";
         kd.style.width = Math.max(2, (kx2 != null ? kx2 : kx1 + 15) - kx1) + "px";
         kd.style.top = "0px";
         kd.style.height = height + "px";
-        kd.style.background = "rgba(33,150,243,0.12)";
-        kd.style.borderLeft = "1px dashed #2196f3";
-        kd.style.borderRight = "1px dashed #2196f3";
+        kd.style.background = hexToRgba(kzColor, 0.12);
+        kd.style.borderLeft = "1px dashed " + kzColor;
+        kd.style.borderRight = "1px dashed " + kzColor;
         ov.appendChild(kd);
-        if (m.label) label(ov, kx1 + 4, 6, m.label, "#2196f3");
+        if (m.label) label(ov, kx1 + 4, 6, m.label, kzColor);
+      } else if (m.type === "text") {
+        var tx = xOf(chart, m.time);
+        var ty = yOf(cs, m.price);
+        if (tx == null || ty == null) continue;
+        label(ov, tx + 3, ty - 7, m.text, m.color || "#333");
+      } else if (m.type === "marker") {
+        var mx = xOf(chart, m.time);
+        var my = yOf(cs, m.price);
+        if (mx == null || my == null) continue;
+        var up = m.direction === "up";
+        var mkColor = m.color || (up ? "#26a69a" : "#ef5350");
+        var md = document.createElement("div");
+        md.style.position = "absolute";
+        md.style.left = (mx - 6) + "px";
+        // up arrow sits below the price pointing up; down arrow above pointing down
+        md.style.top = (up ? my + 3 : my - 17) + "px";
+        md.style.font = "14px Arial";
+        md.style.lineHeight = "14px";
+        md.style.color = mkColor;
+        md.textContent = up ? "▲" : "▼";
+        ov.appendChild(md);
+        if (m.label) label(ov, mx + 9, (up ? my + 3 : my - 17), m.label, mkColor);
       }
     }
 

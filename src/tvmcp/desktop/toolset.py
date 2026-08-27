@@ -6,7 +6,8 @@ warning to stderr (see warnings.py). Requires the app running with
 (set_symbol/set_timeframe) mutate the user's live workspace, so they do not
 register under TV_READ_ONLY=1; status/screenshot always register with the toolset.
 
-First slice: status, screenshot, set symbol, set timeframe. Deferred: drawings,
+Shipped: status, screenshot, set symbol, set timeframe, drawings (list/draw/
+remove via the in-page TradingViewApi charting API - no UI clicking). Deferred:
 bar replay, Pine editor, Strategy Tester reads (see docs/PLAN.md). Brittle by
 nature - TradingView UI updates can break selectors/keyboard flows; errors say so.
 Not affiliated with TradingView, Inc.
@@ -63,6 +64,21 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
             driver.screenshot(page, out_path)
         return {"path": str(out_path), "provider": _PROVIDER, **status}
 
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_list_drawings() -> dict:
+        """List every drawing on the active TradingView Desktop chart, plus the viewport.
+
+        Returns the chart's symbol/resolution, the visible time range (unix
+        seconds) and price range, and each drawing's id, TV shape name, anchor
+        points and text label. Use it to anchor new drawings inside the visible
+        area, and to find ids for tv_desktop_remove_drawing. Drawing texts are
+        untrusted display strings.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = driver.list_drawings(page)
+        return {"provider": _PROVIDER, **res}
+
     if settings.read_only:
         return  # navigation mutates the live workspace - excluded under TV_READ_ONLY
 
@@ -102,3 +118,64 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
         with pages(settings.cdp_url) as page:
             status = driver.set_timeframe(page, tf.canonical)
         return {"requested": tf.canonical, "provider": _PROVIDER, **status}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_draw(
+        kind: Annotated[str, Field(description=(
+            "rectangle (FVG/order-block box, 2 points), trend_line (2), ray (2), "
+            "horizontal_line (1, time optional), vertical_line (1, price optional), "
+            "text (1, floating label)"))],
+        points: Annotated[list[dict], Field(description=(
+            "Anchor points, each {'time': unix seconds, 'price': float}. Omitted "
+            "time/price (where allowed) defaults to the middle of the visible "
+            "viewport - get exact bar times from the data tools and the viewport "
+            "from tv_desktop_list_drawings"))],
+        text: Annotated[str | None, Field(description="Label shown on the drawing")] = None,
+        color: Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$",
+                                    description="Hex line color, e.g. #2962ff")] = "#2962ff",
+        fill_opacity: Annotated[float, Field(ge=0.0, le=1.0,
+                                             description="Rectangle fill opacity")] = 0.15,
+        lock: Annotated[bool, Field(description="Lock against accidental dragging")] = False,
+    ) -> dict:
+        """Draw a shape on the user's live TradingView Desktop chart.
+
+        Uses the app's own charting API (no simulated clicks), so the drawing
+        appears immediately on the chart the user is watching and behaves like a
+        hand-made one (movable, deletable, saved with the layout). Returns the
+        new drawing's id - keep it to remove or reference the drawing later.
+        Draws on the active chart of the layout; verify with
+        tv_desktop_screenshot.
+        """
+        warn_once()
+        need = driver.DRAW_KINDS.get(kind)
+        if need is None:
+            raise ToolError(
+                f"Unknown kind {kind!r}. Supported: {', '.join(sorted(driver.DRAW_KINDS))}"
+            )
+        if len(points) != need:
+            raise ToolError(f"{kind} needs exactly {need} point(s), got {len(points)}")
+        for i, p in enumerate(points):
+            if p.get("price") is None and kind != "vertical_line":
+                raise ToolError(f"points[{i}] is missing 'price' (required for {kind})")
+            if p.get("time") is None and kind not in ("horizontal_line", "text"):
+                raise ToolError(f"points[{i}] is missing 'time' (required for {kind})")
+        with pages(settings.cdp_url) as page:
+            res = driver.draw(page, kind, points, text, color, fill_opacity, lock)
+        return {"kind": kind, "provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_remove_drawing(
+        drawing_id: Annotated[str, Field(description=(
+            "Drawing id from tv_desktop_draw or tv_desktop_list_drawings"))],
+    ) -> dict:
+        """Remove one drawing from the live TradingView Desktop chart by id.
+
+        Removes exactly one entity; there is deliberately no remove-all - the
+        chart holds the user's own hand-made drawings too. Only remove drawings
+        you created, or ones the user explicitly asked to delete (identify them
+        via tv_desktop_list_drawings first).
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = driver.remove_drawing(page, drawing_id)
+        return {"provider": _PROVIDER, **res}

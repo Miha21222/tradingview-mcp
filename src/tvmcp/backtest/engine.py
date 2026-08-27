@@ -126,6 +126,8 @@ def _normalize_trades(stats: "pd.Series", symbol: str, quote_to_account_rate: fl
         pnl = float(t["PnL"])
         sl = t.get("SL")
         sl = float(sl) if sl is not None and not (isinstance(sl, float) and np.isnan(sl)) else None
+        tp = t.get("TP")
+        tp = float(tp) if tp is not None and not (isinstance(tp, float) and np.isnan(tp)) else None
         direction = "long" if size > 0 else "short"
         r = None
         if sl is not None and abs(entry - sl) > 0:
@@ -141,6 +143,7 @@ def _normalize_trades(stats: "pd.Series", symbol: str, quote_to_account_rate: fl
             "pnl": round(pnl, 6),
             "r": r,
             "sl": round(sl, 6) if sl is not None else None,
+            "tp": round(tp, 6) if tp is not None else None,
             "entry_time": et.isoformat(),
             "exit_time": pd.Timestamp(t["ExitTime"]).isoformat(),
             "session": forex.killzone(et.hour) or "off",

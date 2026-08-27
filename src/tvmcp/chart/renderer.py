@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .assets import index_html
-from .markup import BoxMarkup, KillzoneMarkup, LineMarkup, Markup
+from .markup import BoxMarkup, KillzoneMarkup, LineMarkup, Markup, MarkerMarkup, TextMarkup
 
 
 def _unix(value) -> int:
@@ -40,12 +40,20 @@ def build_spec(df: pd.DataFrame, markup: Markup, width: int, height: int) -> dic
         if isinstance(m, BoxMarkup):
             items.append(
                 {"type": m.type, "time": _unix(m.time), "direction": m.direction,
-                 "top": m.top, "bottom": m.bottom}
+                 "top": m.top, "bottom": m.bottom, "color": m.color, "label": m.label}
             )
         elif isinstance(m, LineMarkup):
-            items.append({"type": m.type, "time": _unix(m.time), "level": m.level, "label": m.label})
+            items.append({"type": m.type, "time": _unix(m.time), "level": m.level,
+                          "label": m.label, "color": m.color})
         elif isinstance(m, KillzoneMarkup):
-            items.append({"type": "killzone", "start": _unix(m.start), "end": _unix(m.end), "label": m.label})
+            items.append({"type": "killzone", "start": _unix(m.start), "end": _unix(m.end),
+                          "label": m.label, "color": m.color})
+        elif isinstance(m, TextMarkup):
+            items.append({"type": "text", "time": _unix(m.time), "price": m.price,
+                          "text": m.text, "color": m.color})
+        elif isinstance(m, MarkerMarkup):
+            items.append({"type": "marker", "time": _unix(m.time), "price": m.price,
+                          "direction": m.direction, "label": m.label, "color": m.color})
     return {"bars": bars, "markup": items, "grid": markup.grid, "width": width, "height": height}
 
 

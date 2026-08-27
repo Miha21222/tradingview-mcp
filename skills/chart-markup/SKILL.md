@@ -30,22 +30,35 @@ always pair it with the JSON that produced it.
     {"type": "ob",   "time": "2026-08-24T18:15:00Z", "direction": "bearish", "top": 1.1670, "bottom": 1.1665},
     {"type": "bos",  "time": "2026-08-25T08:00:00Z", "level": 1.1690, "label": "BOS"},
     {"type": "choch","time": "2026-08-25T09:00:00Z", "level": 1.1685, "label": "CHoCH"},
-    {"type": "killzone", "start": "2026-08-24T06:00:00Z", "end": "2026-08-24T09:00:00Z", "label": "London"}
+    {"type": "killzone", "start": "2026-08-24T06:00:00Z", "end": "2026-08-24T09:00:00Z", "label": "London", "color": "#ff9800"},
+    {"type": "text",   "time": "2026-08-25T07:00:00Z", "price": 1.1695, "text": "liquidity swept"},
+    {"type": "marker", "time": "2026-08-25T09:15:00Z", "price": 1.1683, "direction": "down", "label": "entry"}
   ]
 }
 ```
 
 - `time`/`start`/`end` are ISO-8601 UTC and **must fall inside the loaded bar range**
   (enlarge `count` or fix the time if the tool rejects them).
-- `fvg`/`ob`: box between `top` and `bottom` at `time`; `direction` colors it.
+- `fvg`/`ob`: box between `top` and `bottom` at `time`; `direction` colors it; optional `label`.
 - `line`/`bos`/`choch`: horizontal level line at `level` with an optional `label`.
 - `killzone`: vertical band from `start` to `end` with an optional `label`.
+- `text`: free annotation at `time` + `price` (1-80 chars).
+- `marker`: up/down arrow at `time` + `price` (entry/exit points); optional `label`.
+- Every primitive takes an optional `color` (hex `#rrggbb`) overriding its default -
+  this is how a user's preferred palette is taught (put their conventions in a skill).
 - `grid: true` stamps a labeled coordinate grid (the vision aid).
 - Empty `markup_json` renders candles only.
 
+## Windowing history
+
+`end_time` (ISO-8601 UTC) anchors the chart: it shows the `count` bars ENDING there
+instead of now. Use it to zoom any past moment - a backtest trade, a journal entry -
+with `count` sized to the context you want (e.g. entry minus 60 bars). The result's
+`end_time` echoes the actual last bar.
+
 ## Workflow
 
-1. Decide the window: `tv_chart_render(symbol, timeframe, count, markup_json)`.
+1. Decide the window: `tv_chart_render(symbol, timeframe, count, markup_json, end_time?)`.
 2. Build the markup from your data (scan results, journal levels, backtest SL/TP).
 3. Check the returned `path` — a PNG in the managed chart dir (never a caller-chosen
    path). `markup_count`/`bars` confirm what was drawn.

@@ -53,10 +53,13 @@ def _make_df(n=60) -> pd.DataFrame:
     )
 
 
-def _loader(df: pd.DataFrame):
-    def load(symbol, timeframe, count, provider):
+def _loader(df: pd.DataFrame, seen_ends: list | None = None):
+    def load(symbol, timeframe, count, provider, end_ts=None):
+        if seen_ends is not None:
+            seen_ends.append(end_ts)
         sym, tf = resolve(symbol), resolve_timeframe(timeframe)
-        return sym, tf, df.tail(count).reset_index(drop=True)
+        sliced = df if end_ts is None else df[df["time"] <= end_ts]
+        return sym, tf, sliced.tail(count).reset_index(drop=True)
 
     return load
 
@@ -153,6 +156,67 @@ def test_empty_markup_renders_candles_only(tmp_path):
     data = _data(mcp, "tv_chart_render", {"symbol": "EURUSD", "timeframe": "H1", "count": 60, "markup_json": ""})
     assert data["markup_count"] == 0
     assert calls[0]["markup"] == []
+
+
+def test_end_time_windows_history(tmp_path):
+    df = _make_df(60)
+    seen_ends: list = []
+    calls: list = []
+    mcp = FastMCP(name="test")
+    chart.register(mcp, _settings(tmp_path), loader=_loader(df, seen_ends), renderer=_fake_renderer(calls))
+    anchor = df["time"].iloc[39].isoformat()
+    data = _data(mcp, "tv_chart_render", {
+        "symbol": "EURUSD", "timeframe": "H1", "count": 30, "end_time": anchor,
+    })
+    assert seen_ends[0] == df["time"].iloc[39]
+    assert data["end_time"] == anchor  # chart really ends at the anchor, not now
+    assert data["bars"] == 30
+
+
+def test_end_time_naive_treated_as_utc(tmp_path):
+    df = _make_df(60)
+    seen_ends: list = []
+    calls: list = []
+    mcp = FastMCP(name="test")
+    chart.register(mcp, _settings(tmp_path), loader=_loader(df, seen_ends), renderer=_fake_renderer(calls))
+    _data(mcp, "tv_chart_render", {
+        "symbol": "EURUSD", "timeframe": "H1", "count": 30, "end_time": "2026-01-02 12:00:00",
+    })
+    assert seen_ends[0] == pd.Timestamp("2026-01-02T12:00:00Z")
+
+
+def test_bad_end_time_raises(tmp_path):
+    mcp, _ = _build(tmp_path)
+    text = _error(mcp, "tv_chart_render", {
+        "symbol": "EURUSD", "timeframe": "H1", "count": 60, "end_time": "not-a-time",
+    })
+    assert "end_time" in text
+
+
+def test_future_end_time_raises(tmp_path):
+    mcp, _ = _build(tmp_path)
+    text = _error(mcp, "tv_chart_render", {
+        "symbol": "EURUSD", "timeframe": "H1", "count": 60, "end_time": "2999-01-01T00:00:00Z",
+    })
+    assert "future" in text
+
+
+def test_new_markup_types_reach_renderer(tmp_path):
+    mcp, calls = _build(tmp_path)
+    markup = json.dumps({"version": 1, "markup": [
+        {"type": "text", "time": "2026-01-02T00:00:00Z", "price": 1.105, "text": "note", "color": "#112233"},
+        {"type": "marker", "time": "2026-01-02T01:00:00Z", "price": 1.106, "direction": "down", "label": "exit"},
+        {"type": "fvg", "time": "2026-01-02T02:00:00Z", "direction": "bullish",
+         "top": 1.107, "bottom": 1.106, "color": "#ff9800", "label": "FVG"},
+    ]})
+    data = _data(mcp, "tv_chart_render", {
+        "symbol": "EURUSD", "timeframe": "H1", "count": 60, "markup_json": markup,
+    })
+    assert data["markup_count"] == 3
+    by_type = {m["type"]: m for m in calls[0]["markup"]}
+    assert by_type["text"]["text"] == "note" and by_type["text"]["color"] == "#112233"
+    assert by_type["marker"]["direction"] == "down" and by_type["marker"]["label"] == "exit"
+    assert by_type["fvg"]["color"] == "#ff9800" and by_type["fvg"]["label"] == "FVG"
 
 
 

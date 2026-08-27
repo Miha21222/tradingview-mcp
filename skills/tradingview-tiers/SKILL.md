@@ -1,6 +1,6 @@
 ---
 name: tradingview-tiers
-description: "Operate the opt-in TradingView account tiers: the session toolset (realtime TV-account data via the sessionid cookie) and the desktop toolset (drive the real TradingView Desktop app over CDP - screenshots, symbol/timeframe control). Use when the user wants TV-chart-parity candles, realtime quotes from their account, to see or control their actual TradingView charts, or when a session/desktop tool errors. Triggers: my tradingview account data, realtime quote, control my chart, screenshot my tradingview, session cookie, desktop app automation, TV_SESSIONID, CDP."
+description: "Operate the opt-in TradingView account tiers: the session toolset (realtime TV-account data via the sessionid cookie) and the desktop toolset (drive the real TradingView Desktop app over CDP - screenshots, symbol/timeframe control, drawing on the live chart). Use when the user wants TV-chart-parity candles, realtime quotes from their account, to see or control their actual TradingView charts, to have shapes drawn on the chart they are watching, or when a session/desktop tool errors. Triggers: my tradingview account data, realtime quote, control my chart, draw on my chart, mark the FVG on my chart, screenshot my tradingview, session cookie, desktop app automation, TV_SESSIONID, CDP."
 ---
 
 # TradingView account tiers: session and desktop
@@ -19,6 +19,9 @@ when the free feeds answer the question.
   account-feed quotes → `session` tier.
 - Seeing or driving the user's actual chart layout (their indicators, their
   drawings) → `desktop` tier.
+- Marking up the chart the user is LOOKING AT (draw an FVG box, a level, a
+  trendline on their live layout) → `desktop` tier drawing tools. For a PNG
+  the user reviews out-of-band, prefer the free `chart` toolset instead.
 
 ## Session tier (`tv_session_status`, `tv_session_ohlcv`, `tv_session_realtime`)
 
@@ -37,7 +40,7 @@ Mechanics you should know:
   password change rots it) — ask the human for a fresh one; nothing else fixes it.
 - `provider` is always `session`; treat its levels as feed-specific like any other.
 
-## Desktop tier (`tv_desktop_status`, `tv_desktop_screenshot`, `tv_desktop_set_symbol`, `tv_desktop_set_timeframe`)
+## Desktop tier (`tv_desktop_status`, `tv_desktop_screenshot`, `tv_desktop_list_drawings`, `tv_desktop_set_symbol`, `tv_desktop_set_timeframe`, `tv_desktop_draw`, `tv_desktop_remove_drawing`)
 
 Setup:
 1. TradingView Desktop must run with a CDP flag: `scripts/start-tv-desktop.ps1`
@@ -61,6 +64,15 @@ Operating notes:
 - This tier is brittle by nature: a TradingView UI update can break selectors or
   keyboard flows. If tools suddenly misbehave after an app update, that is the
   likely cause — report it, don't retry blindly.
+- Drawing tools (`tv_desktop_draw`/`tv_desktop_remove_drawing`/`tv_desktop_list_drawings`)
+  use the app's in-page charting API, not simulated clicks — shapes land exactly
+  at the given {time (unix seconds), price} anchors and behave like hand-made
+  drawings (movable, saved with the layout). Workflow: `tv_desktop_list_drawings`
+  first (viewport ranges anchor your points; existing ids are the user's work),
+  draw, confirm with `tv_desktop_screenshot`, and keep returned ids so you can
+  remove your own shapes later. Kinds: rectangle, trend_line, ray,
+  horizontal_line, vertical_line, text. NEVER remove a drawing you did not
+  create unless the user names it explicitly — there is no remove-all by design.
 - Advise closing the CDP-enabled app when not in use: any local process that can
   reach the port can drive the logged-in session.
 

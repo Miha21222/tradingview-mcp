@@ -3,6 +3,7 @@ tool tests use a mocked loader (no network)."""
 
 import asyncio
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -79,6 +80,26 @@ def _breakout_params():
     return {"lookback": 2, "rr": 1.0, "risk_amount": 100.0}
 
 
+def _make_m15_df(n=2000, seed=7) -> pd.DataFrame:
+    """Volatile M15 random-walk with drift: produces H4 structure breaks and M15 FVGs."""
+    times = pd.date_range("2026-01-01", periods=n, freq="15min", tz="UTC")
+    rng = np.random.RandomState(seed)
+    steps = rng.normal(0.00002, 0.0011, n)
+    cl = 1.10 + np.cumsum(steps) + 0.006 * np.sin(np.linspace(0, 8 * np.pi, n))
+    op = np.roll(cl, 1)
+    op[0] = cl[0]
+    return pd.DataFrame(
+        {
+            "time": times,
+            "open": op,
+            "high": np.maximum(op, cl) + rng.uniform(0, 0.0008, n),
+            "low": np.minimum(op, cl) - rng.uniform(0, 0.0008, n),
+            "close": cl,
+            "volume": 100 + rng.rand(n) * 50,
+        }
+    )
+
+
 # ---------------- engine-level ----------------
 
 def test_engine_runs_both_strategies():
@@ -104,6 +125,7 @@ def test_engine_breakout_trades_have_r_units_and_session():
     assert t["session"] in {"off", "Asian kill zone", "London open kill zone",
                             "New York kill zone", "London close kill zone"}
     assert t["sl"] is not None
+    assert t["tp"] is not None
     assert t["r"] is not None
 
 
@@ -190,6 +212,51 @@ def _error(mcp, name, args):
     with pytest.raises(ToolError) as ei:
         asyncio.run(mcp.call_tool(name, args))
     return str(ei.value)
+
+
+def test_engine_runs_smc_h4_m15():
+    df = _make_m15_df()
+    summary, trades, meta = engine.run(
+        df, "smc_h4_m15", {}, "EURUSD", cash=10000, spread_pips=1.0, margin=0.02
+    )
+    assert summary["# Trades"] >= 1, "synthetic walk should produce at least one SMC trade"
+    for t in trades:
+        assert t["sl"] is not None
+        assert t["r"] is not None
+        # risk-sized: a full stop-out is ~-1R (spread/gap tolerance)
+        assert t["r"] > -1.6
+
+
+def test_smc_h4_m15_no_lookahead_prefix_stability():
+    """Trades in the common history must be identical when later bars are removed -
+    any dependence on future data (FVG mitigation, later H4 breaks) would change them."""
+    full = _make_m15_df(n=2000)
+    short = full.iloc[:1500].reset_index(drop=True)
+    _, trades_full, _ = engine.run(full, "smc_h4_m15", {}, "EURUSD", cash=10000, margin=0.02)
+    _, trades_short, _ = engine.run(short, "smc_h4_m15", {}, "EURUSD", cash=10000, margin=0.02)
+    # compare only trades fully closed well inside the short window
+    cutoff = short["time"].iloc[-200].isoformat()
+    key = lambda t: (t["entry_time"], t["direction"], t["entry_price"], t["sl"])
+    a = [key(t) for t in trades_full if t["exit_time"] < cutoff]
+    b = [key(t) for t in trades_short if t["exit_time"] < cutoff]
+    assert a == b
+
+
+def test_tool_invariant_bad_smc_params_raise(tmp_path):
+    mcp = _build(tmp_path)
+    for bad in ['{"swing_length":1}', '{"rr":0}', '{"risk_amount":-5}', '{"expiry_bars":0}']:
+        text = _error(mcp, "tv_backtest_run", {
+            "strategy": "smc_h4_m15", "symbol": "EURUSD", "params_json": bad,
+        })
+        assert "smc_h4_m15 param" in text
+
+
+def test_tool_smc_rejects_h4_and_slower_timeframes(tmp_path):
+    mcp = _build(tmp_path, df=_make_m15_df(n=300))
+    text = _error(mcp, "tv_backtest_run", {
+        "strategy": "smc_h4_m15", "symbol": "EURUSD", "timeframe": "H4", "count": 300,
+    })
+    assert "below H4" in text
 
 
 def test_tool_runs_and_reports_metadata(tmp_path):
@@ -281,4 +348,106 @@ def test_tool_nonpositive_rate_raises(tmp_path):
             "account_currency": "USD", "quote_to_account_rate": bad,
         })
         assert "finite number > 0" in text
+
+
+# ---------------- trade rendering (fake renderer, no Chromium) ----------------
+
+def _fake_renderer(specs: list):
+    def draw(spec, out_path):
+        specs.append(spec)
+        Path(out_path).write_bytes(b"\x89PNG fake")
+
+    return draw
+
+
+def _build_with_renderer(tmp_path, df, specs):
+    mcp = FastMCP(name="test")
+    backtest.register(mcp, _settings(tmp_path), loader=_loader(df), renderer=_fake_renderer(specs))
+    return mcp
+
+
+def _flat_df(n=60) -> pd.DataFrame:
+    times = pd.date_range("2026-01-01", periods=n, freq="h", tz="UTC")
+    return pd.DataFrame({
+        "time": times, "open": 1.1, "high": 1.1, "low": 1.1, "close": 1.1, "volume": 100.0,
+    })
+
+
+def test_tool_render_trades_writes_png_with_trade_markup(tmp_path):
+    specs: list = []
+    mcp = _build_with_renderer(tmp_path, _crafted_eurusd(), specs)
+    data = _data(mcp, "tv_backtest_render_trades", {
+        "strategy": "breakout", "symbol": "EURUSD", "count": 200,
+        "params_json": json.dumps(_breakout_params()),
+    })
+    assert data["total_trades"] == 1 and data["rendered_count"] == 1
+    rec = data["rendered"][0]
+    assert rec["path"].endswith(".png") and Path(rec["path"]).exists()
+    assert str(Path(rec["path"]).parent) == str(tmp_path / "charts")
+    assert rec["sl"] is not None and rec["tp"] is not None
+
+    spec = specs[0]
+    types = sorted(m["type"] for m in spec["markup"])
+    # trade lifetime band + entry line + SL line + TP line + exit line
+    assert types == ["killzone", "line", "line", "line", "line"]
+    levels = {m["level"] for m in spec["markup"] if "level" in m}
+    assert rec["entry_price"] in levels and rec["sl"] in levels and rec["tp"] in levels
+    colors = {m.get("label"): m.get("color") for m in spec["markup"] if m.get("label") in ("SL", "TP")}
+    assert colors == {"SL": "#e53935", "TP": "#43a047"}
+    assert spec["bars"], "render window must contain bars"
+
+
+def test_tool_render_trades_layers_extra_markup(tmp_path):
+    specs: list = []
+    mcp = _build_with_renderer(tmp_path, _crafted_eurusd(), specs)
+    extra = json.dumps({"version": 1, "markup": [
+        {"type": "text", "time": "2026-01-01T03:00:00Z", "price": 1.1005, "text": "breakout bar", "color": "#ff9800"},
+        {"type": "marker", "time": "2026-01-01T04:00:00Z", "price": 1.1010, "direction": "up"},
+    ]})
+    data = _data(mcp, "tv_backtest_render_trades", {
+        "strategy": "breakout", "symbol": "EURUSD", "count": 200,
+        "params_json": json.dumps(_breakout_params()), "extra_markup_json": extra,
+    })
+    assert data["rendered_count"] == 1
+    types = [m["type"] for m in specs[0]["markup"]]
+    assert "text" in types and "marker" in types
+    txt = next(m for m in specs[0]["markup"] if m["type"] == "text")
+    assert txt["text"] == "breakout bar" and txt["color"] == "#ff9800"
+
+
+def test_tool_render_trades_bad_extra_markup_raises(tmp_path):
+    specs: list = []
+    mcp = _build_with_renderer(tmp_path, _crafted_eurusd(), specs)
+    text = _error(mcp, "tv_backtest_render_trades", {
+        "strategy": "breakout", "symbol": "EURUSD", "count": 200,
+        "params_json": json.dumps(_breakout_params()),
+        "extra_markup_json": '{"version":1,"markup":[{"type":"wibble"}]}',
+    })
+    assert "invalid markup_json" in text
+
+
+def test_tool_render_trades_no_trades_notes_and_writes_nothing(tmp_path):
+    specs: list = []
+    mcp = _build_with_renderer(tmp_path, _flat_df(), specs)
+    data = _data(mcp, "tv_backtest_render_trades", {
+        "strategy": "breakout", "symbol": "EURUSD", "count": 60,
+        "params_json": json.dumps(_breakout_params()),
+    })
+    assert data["total_trades"] == 0 and data["rendered"] == []
+    assert "nothing to render" in data["note"]
+    assert specs == []
+
+
+def test_tool_render_trades_respects_max_renders(tmp_path):
+    specs: list = []
+    mcp = _build_with_renderer(tmp_path, _make_df(400), specs)
+    data = _data(mcp, "tv_backtest_render_trades", {
+        "strategy": "breakout", "symbol": "EURUSD", "count": 400,
+        "params_json": json.dumps(_breakout_params()), "max_renders": 2,
+    })
+    assert data["total_trades"] >= 3, "trend series should produce several trades"
+    assert data["rendered_count"] == 2 == len(specs)
+    # rendered trades are the most recent ones (list is oldest-first)
+    times = [r["entry_time"] for r in data["rendered"]]
+    assert times == sorted(times)
 

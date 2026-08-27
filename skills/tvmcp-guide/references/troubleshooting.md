@@ -84,6 +84,8 @@ commands. This table covers everything else, per toolset.
 | "no TradingView chart tab" | App open but no chart / not logged in | Human opens a chart layout in the app |
 | set_symbol picked the wrong listing | TV quick-search matched another exchange | Pass the exchange-qualified form (`OANDA:EURUSD`); verify with `tv_desktop_screenshot` |
 | Tools broke after a TradingView update | UI selectors/keyboard flows changed | Known brittleness of the desktop tier; report it — the driver lives in `src/tvmcp/desktop/driver.py` |
+| tv_desktop_draw errors "no new drawing appeared" | Shape kind unsupported by this app build, or `getAllShapes()` lag (the draw JS polls ~2s) | Try another kind; verify with `tv_desktop_screenshot` — the shape may exist despite the error, so `tv_desktop_list_drawings` before retrying (avoids phantom duplicates) |
+| tv_desktop_draw "page does not expose TradingViewApi" | Chart still loading, or a non-chart tab won target selection | Wait for the chart to render and retry |
 
 ## Everywhere
 

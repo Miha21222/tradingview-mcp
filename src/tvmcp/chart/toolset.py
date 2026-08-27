@@ -29,13 +29,27 @@ _MAX_DIM = 2000
 _MIN_DIM = 200
 
 
-def _load(settings: Settings, cache: BarCache, symbol: str, timeframe: str, count: int, provider: str):
+def _load(settings: Settings, cache: BarCache, symbol: str, timeframe: str, count: int, provider: str,
+          end_ts: pd.Timestamp | None = None):
     sym = resolve(symbol)
     tf = resolve_timeframe(timeframe)
-    end_ts = pd.Timestamp.now(tz="UTC")
+    end_ts = end_ts if end_ts is not None else pd.Timestamp.now(tz="UTC")
     start_ts, _ = window(count, tf.minutes, end_ts)
     df = load_bars(settings, cache, sym, tf, start_ts, end_ts, count, provider)
     return sym, tf, df
+
+
+def _parse_end_time(end_time: str | None) -> pd.Timestamp | None:
+    if not end_time or not end_time.strip():
+        return None
+    try:
+        ts = pd.Timestamp(end_time)
+    except (ValueError, TypeError) as exc:
+        raise ToolError(f"end_time is not a valid ISO-8601 timestamp: {end_time!r}") from exc
+    ts = ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+    if ts > pd.Timestamp.now(tz="UTC"):
+        raise ToolError(f"end_time {end_time!r} is in the future")
+    return ts
 
 
 def _validate_times(markup: Markup, first_ts: pd.Timestamp, last_ts: pd.Timestamp) -> None:
@@ -59,7 +73,7 @@ def _validate_times(markup: Markup, first_ts: pd.Timestamp, last_ts: pd.Timestam
 
 def register(mcp: Any, settings: Settings, loader: Callable | None = None, renderer: Callable | None = None) -> None:
     cache = BarCache(settings.cache_dir)
-    load = loader or (lambda s, tf, c, p: _load(settings, cache, s, tf, c, p))
+    load = loader or (lambda s, tf, c, p, end_ts=None: _load(settings, cache, s, tf, c, p, end_ts))
     draw = renderer or render_png
     out_dir = settings.chart_dir
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -71,21 +85,27 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None, rende
         count: Annotated[int, Field(description="Most-recent bars to chart", ge=20, le=500)] = 150,
         provider: Annotated[str, Field(description="auto | dukascopy | oanda")] = "auto",
         markup_json: Annotated[str, Field(description="Versioned JSON spec of SMC markup (see README/PLAN); empty = candles only")] = "",
+        end_time: Annotated[str | None, Field(description="ISO-8601 UTC anchor: chart the `count` bars ENDING at this time (default: now). Lets you window any historical moment, e.g. a past trade.")] = None,
         width: Annotated[int, Field(description="Output width px", ge=_MIN_DIM, le=_MAX_DIM)] = 1200,
         height: Annotated[int, Field(description="Output height px", ge=_MIN_DIM, le=_MAX_DIM)] = 700,
     ) -> dict:
         """Render candles + SMC markup to a PNG file and return its path.
 
         Markup primitives (anchored to bar times, ISO-8601 UTC): fvg/ob box (time,
-        direction, top, bottom), line/bos/choch (time, level, optional label),
-        killzone (start, end, optional label); plus `grid` (bool) and `version`.
+        direction, top, bottom), line/bos/choch (time, level), killzone (start, end),
+        text (time, price, text), marker (time, price, direction up/down); every
+        primitive takes an optional hex `color` and most an optional `label`; plus
+        `grid` (bool) and `version`. `end_time` windows history: the chart shows the
+        `count` bars ending there instead of now.
         Example:
           {"version":1,"grid":true,"markup":[
-             {"type":"fvg","time":"2026-08-24T17:15:00Z","direction":"bullish","top":1.1662,"bottom":1.1660},
-             {"type":"killzone","start":"2026-08-24T06:00:00Z","end":"2026-08-24T09:00:00Z","label":"London"}]}
+             {"type":"fvg","time":"2026-08-24T17:15:00Z","direction":"bullish","top":1.1662,"bottom":1.1660,"label":"FVG"},
+             {"type":"marker","time":"2026-08-24T18:00:00Z","price":1.1661,"direction":"up","label":"entry"},
+             {"type":"killzone","start":"2026-08-24T06:00:00Z","end":"2026-08-24T09:00:00Z","label":"London","color":"#ff9800"}]}
         """
         markup = parse_markup(markup_json)
-        sym, tf, df = load(symbol, timeframe, count, provider)
+        end_ts = _parse_end_time(end_time)
+        sym, tf, df = load(symbol, timeframe, count, provider, end_ts)
 
         count = int(len(df))
         if count < _MIN_RENDER_BARS:
@@ -104,6 +124,7 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None, rende
 
         return {
             "path": str(out_path),
+            "end_time": df["time"].iloc[-1].isoformat(),
             "symbol": sym.canonical,
             "tv_symbol": sym.tv,
             "provider": choose_provider(provider, settings),

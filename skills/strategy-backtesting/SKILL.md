@@ -19,8 +19,18 @@ only** — never run user/LLM Python code (blocked by the hard rules).
 
 ## Tools
 
-- `tv_backtest_run` — run a built-in strategy (`sma_cross`, `breakout`) with full
+- `tv_backtest_run` — run a built-in strategy (`sma_cross`, `breakout`, `smc_h4_m15`) with full
   currency/spread/fill controls.
+- `tv_backtest_render_trades` — same backtest, but renders the most recent N closed
+  trades to PNGs (entry line, SL red, TP green, exit labeled with R, band over the
+  trade's lifetime) for a visual sanity check of the fills; needs headless Chromium.
+  `extra_markup_json` layers custom drawings (killzones, boxes, text, markers,
+  hex colors — full tv_chart_render schema) onto every image.
+- Fully custom screenshots: `tv_backtest_run` gives every trade's entry/exit
+  times + prices + sl/tp; feed them to `tv_chart_render` with `end_time` (window
+  any historical trade) and your own `markup_json`. A user's preferred style
+  (colors, what to draw, sizes) belongs in a skill file so the agent applies it
+  every time — that's the customization path, no code changes.
 - `tv_strategy_list` — list declarative YAML strategies in `TV_STRATEGY_DIR`.
 - `tv_strategy_run` — run a declarative YAML strategy (same engine as backtest).
 - `tv_data_get_bars` — fetch the bars you intend to test.
@@ -51,10 +61,25 @@ only** — never run user/LLM Python code (blocked by the hard rules).
 2. Run: `tv_backtest_run(strategy, symbol, timeframe, count, spread_pips, cash, ...)`.
 3. Read `summary` (win rate, profit factor, expectancy, max drawdown) and the capped
    recent `trades` (each with direction, size, units, R, session).
+3b. Eyeball the fills: `tv_backtest_render_trades(strategy, symbol, ..., max_renders)`
+   renders each recent trade on the actual bars — check the entry sits where the rule
+   says, the SL/TP bracket looks right, and a -1R exit actually tags the SL line.
 4. Compare against a baseline (e.g. `sma_cross`); a strategy is only "better" with
    enough trades and a spread/commission-realistic expectancy above the baseline.
 5. For a reusable idea, save a YAML spec (see `tv_strategy_list`) and re-run via
    `tv_strategy_run` instead of repeating parameters.
+
+
+### smc_h4_m15 (SMC multi-timeframe)
+
+H4 bias (BOS/CHoCH on resampled bars, confirmed only at the breaking H4 close) +
+M15 FVG retrace entry, SL at the far gap edge, TP at `rr`. Run it on M15 bars
+(the tool rejects H4 and slower). Params: `swing_length` (H4 structure),
+`rr`, `risk_amount`, `expiry_bars` (zone lifetime in bars), `use_choch`
+(bias flips on CHoCH too), `min_stop_frac` (skip micro-stops). It is a
+mechanical simplification of the owner's H4→M15 scheme — no killzone window,
+no liquidity-sweep precondition yet — so treat raw results as a harness
+baseline, not a verdict on the discretionary setup.
 
 ## Declarative YAML spec
 

@@ -83,7 +83,7 @@ def test_chart_gated_off_by_default(tmp_path):
 def test_backtest_toolset_registers_run(tmp_path):
     mcp = build_server(_settings({"public", "data", "backtest"}, tmp_path))
     names = _tool_names(mcp)
-    assert "tv_backtest_run" in names
+    assert {"tv_backtest_run", "tv_backtest_render_trades"} <= names
 
 
 def test_backtest_gated_off_by_default(tmp_path):

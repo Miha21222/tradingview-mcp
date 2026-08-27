@@ -9,12 +9,21 @@ browser so output is deterministic across timezones.
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Literal, Union
 
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 MARKUP_VERSION = 1
+
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _check_color(v: str | None) -> str | None:
+    if v is not None and not _HEX_COLOR.match(v):
+        raise ValueError(f"color must be a hex #rrggbb string, got {v!r}")
+    return v
 
 
 class BoxMarkup(BaseModel):
@@ -25,6 +34,10 @@ class BoxMarkup(BaseModel):
     direction: Literal["bullish", "bearish"]
     top: float
     bottom: float
+    color: str | None = None  # hex #rrggbb; overrides the direction color
+    label: str | None = None
+
+    _color = field_validator("color")(_check_color)
 
     @field_validator("top", "bottom")
     @classmethod
@@ -47,6 +60,9 @@ class LineMarkup(BaseModel):
     time: str
     level: float
     label: str | None = None
+    color: str | None = None  # hex #rrggbb; overrides the type color
+
+    _color = field_validator("color")(_check_color)
 
     @field_validator("level")
     @classmethod
@@ -63,9 +79,54 @@ class KillzoneMarkup(BaseModel):
     start: str
     end: str
     label: str | None = None
+    color: str | None = None  # hex #rrggbb; overrides the default blue
+
+    _color = field_validator("color")(_check_color)
 
 
-MarkupItem = Annotated[Union[BoxMarkup, LineMarkup, KillzoneMarkup], Field(discriminator="type")]
+class TextMarkup(BaseModel):
+    """Free text annotation anchored at a bar time + price."""
+
+    type: Literal["text"]
+    time: str
+    price: float
+    text: str = Field(min_length=1, max_length=80)
+    color: str | None = None  # hex #rrggbb
+
+    _color = field_validator("color")(_check_color)
+
+    @field_validator("price")
+    @classmethod
+    def _positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("price must be > 0")
+        return v
+
+
+class MarkerMarkup(BaseModel):
+    """Up/down arrow marker at a bar time + price (e.g. entry/exit points)."""
+
+    type: Literal["marker"]
+    time: str
+    price: float
+    direction: Literal["up", "down"]
+    label: str | None = None
+    color: str | None = None  # hex #rrggbb; default green (up) / red (down)
+
+    _color = field_validator("color")(_check_color)
+
+    @field_validator("price")
+    @classmethod
+    def _positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("price must be > 0")
+        return v
+
+
+MarkupItem = Annotated[
+    Union[BoxMarkup, LineMarkup, KillzoneMarkup, TextMarkup, MarkerMarkup],
+    Field(discriminator="type"),
+]
 
 
 class Markup(BaseModel):
