@@ -10,7 +10,8 @@ click that DOM without writing selectors into every tool:
 - `click_element`: click only when exactly one element matches; zero or many
   matches come back as data (`miss` / `ambiguous` + candidates), never as an
   exception, so the caller can refine the query.
-- `dismiss_dialogs`: close every visible `[role="dialog"]` by clicking its
+- `dismiss_dialogs`: close every visible dialog (including TradingView's
+  role-less confirm modals) by clicking its
   Cancel/close button. Landmine: TradingView ignores a synthetic Escape
   keydown (verified on the replay date picker, M7) - clicking is the only
   reliable dismissal.
@@ -49,7 +50,7 @@ _UI_HELPERS_JS = """
       text: (txt(el) || attr(el, 'title')).slice(0, 60) || null,
       role: attr(el, 'role') || null,
       rect: {x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height)},
-      in_dialog: !!el.closest('[role="dialog"]'),
+      in_dialog: !!el.closest('[role="dialog"], [data-name="confirm-dialog"], [data-name="rename-dialog"], [data-qa-id="ui-lib-PopupDialog"]'),
     };
   };
   const isButton = (el) => el.tagName === 'BUTTON' || attr(el, 'role') === 'button';
@@ -119,7 +120,11 @@ _DIALOGS_JS = """
     return ((t && txt(t)) || attr(d, 'aria-label') || txt(d)).slice(0, 80) || null;
   };
   const label = (b) => [txt(b), attr(b, 'title'), attr(b, 'aria-label')].join(' | ');
-  const dialogs = () => Array.from(document.querySelectorAll('[role="dialog"]')).filter(visible);
+  // TradingView's confirm modals ("Save the script before adding to chart?")
+  // carry NO role="dialog" - they are [data-name="confirm-dialog"] /
+  // [data-qa-id="ui-lib-PopupDialog"] with yes-btn / no-btn inside. Verified
+  // live 2026-09-19; missing them left an invisible modal blocking the build.
+  const dialogs = () => Array.from(document.querySelectorAll('[role="dialog"], [data-name="confirm-dialog"], [data-name="rename-dialog"], [data-qa-id="ui-lib-PopupDialog"]')).filter(visible);
   const dismissed = [];
   for (const d of dialogs()) {
     const t = title(d);

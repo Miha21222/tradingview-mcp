@@ -221,10 +221,15 @@ _COMPILE_RESULT_JS = """
 _SAVE_DIALOG_JS = """
 /*tvmcp:pine_save*/
 (() => {
-  const dlg = document.querySelector('[role="dialog"]');
+  // The confirm modal has no role="dialog" (verified live 2026-09-19): it is
+  // [data-name="confirm-dialog"] / [data-qa-id="ui-lib-PopupDialog"], and its
+  // affirmative button is [data-qa-id="yes-btn"] (localized text).
+  const dlg = Array.from(document.querySelectorAll('[role="dialog"], [data-name="confirm-dialog"], [data-name="rename-dialog"], [data-qa-id="ui-lib-PopupDialog"]'))
+    .filter(d => d.offsetParent !== null).pop();
   if (!dlg) return {dialog: false};
   const all = Array.from(dlg.querySelectorAll('button'));
-  const btn = all.find(b => /^(save|сохранить)$/i.test((b.textContent || '').trim()));
+  const btn = dlg.querySelector('[data-qa-id="yes-btn"], button[name="yes"]')
+    || all.find(b => /^(save|сохранить)$/i.test((b.textContent || '').trim()));
   if (!btn) return {dialog: true, clicked: false, buttons: all.map(b => (b.textContent || '').trim().slice(0, 30))};
   btn.click();
   return {dialog: true, clicked: true};
@@ -377,7 +382,7 @@ _DIALOG_JS = """
   const p = __PAYLOAD__;
   const vis = (el) => !!el && el.offsetParent !== null;
   const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
-  const dlgs = Array.from(document.querySelectorAll('[data-name="rename-dialog"], [role="dialog"]')).filter(vis);
+  const dlgs = Array.from(document.querySelectorAll('[data-name="rename-dialog"], [data-name="confirm-dialog"], [data-qa-id="ui-lib-PopupDialog"], [role="dialog"]')).filter(vis);
   if (!dlgs.length) return {dialog: false};
   const d = dlgs[dlgs.length - 1];
   const tEl = d.querySelector('[data-name="dialog-title"], h1, h2, h3, [class*="title"]');
@@ -385,6 +390,11 @@ _DIALOG_JS = """
   const btns = Array.from(d.querySelectorAll('button')).filter(vis);
   const bl = btns.map(b => clean([b.textContent, b.getAttribute('title'), b.getAttribute('aria-label')].join(' | ')).slice(0, 40));
   const saveBtn = () => {
+    // Confirm modals answer with [data-qa-id="yes-btn"] / button[name="yes"];
+    // the rename dialog uses save-btn. Text matching is the last resort - the
+    // wording is localized.
+    const y = d.querySelector('button[data-qa-id="yes-btn"], button[name="yes"]');
+    if (y) return [y, 'yes-btn'];
     const q = d.querySelector('button[data-qa-id="save-btn"]');
     if (q) return [q, 'save-btn'];
     const s = d.querySelector('button[type="submit"], [type="submit"]');
@@ -738,12 +748,13 @@ def settle_markers(page, max_s: float = 6.0, interval_s: float = 0.3) -> dict:
         clock.sleep(interval_s)
 
 
-def _handle_compile_dialogs(page, save_name: str | None, timeout_s: float = 3.0) -> list[dict]:
+def _handle_compile_dialogs(page, save_name: str | None, timeout_s: float = 6.0) -> list[dict]:
     """After the compile click: "Save this script before adding?" -> Save; a
     rename input -> fill `save_name` -> Save. Polls <= timeout_s, stops after
     three quiet polls."""
     handled: list[dict] = []
-    deadline = clock.now() + timeout_s
+    start = clock.now()
+    deadline = start + timeout_s
     quiet = 0
     while clock.now() < deadline:
         r = _dialog(page, save_name)
@@ -755,7 +766,9 @@ def _handle_compile_dialogs(page, save_name: str | None, timeout_s: float = 3.0)
                 break  # a dialog we cannot answer - report it, do not spin
         else:
             quiet += 1
-            if quiet >= 3:
+            # The "save before adding?" modal can take a second to mount; only
+            # give up after ~1.5 s of quiet, and never before 1.5 s elapsed.
+            if quiet >= 5 and clock.now() - start >= 1.5:
                 break
         clock.sleep(0.3)
     return handled

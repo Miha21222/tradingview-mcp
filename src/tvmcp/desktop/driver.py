@@ -110,6 +110,38 @@ class DesktopPage:
         self._cdp.call("Input.dispatchKeyEvent", {"type": "keyDown", **spec})
         self._cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", **{k: v for k, v in spec.items() if k != "text"}})
 
+    def mouse_click(self, x: float, y: float, clicks: int = 1) -> None:
+        """Click at viewport coordinates with real input events.
+
+        `element.click()` from `Runtime.evaluate` is an untrusted event, which
+        some handlers ignore. TradingView's own panel buttons and menus do
+        accept DOM clicks (verified live on TV Desktop 3.4.1 - what looked like
+        a dead "Add to chart" button was an unnoticed confirm modal blocking
+        the app), so this is an escape hatch for controls that turn out to
+        need real input events, not the default path.
+        """
+        base = {"x": float(x), "y": float(y), "button": "left", "clickCount": clicks}
+        self._cdp.call("Input.dispatchMouseEvent", {"type": "mouseMoved", **base})
+        self._cdp.call("Input.dispatchMouseEvent", {"type": "mousePressed", "buttons": 1, **base})
+        self._cdp.call("Input.dispatchMouseEvent", {"type": "mouseReleased", "buttons": 0, **base})
+
+    def click_selector(self, selector: str, scroll: bool = True) -> dict:
+        """Trusted click on the first visible match of a CSS selector."""
+        box = self.eval(
+            "(() => { const p = " + json.dumps(selector) + ";"
+            " let el = null; try { el = document.querySelector(p); } catch (e) { return {error: 'bad selector'}; }"
+            " if (!el || el.offsetParent === null) return {found: false};"
+            + (" try { el.scrollIntoView({block: 'center', inline: 'center'}); } catch (e) {}" if scroll else "")
+            + " const r = el.getBoundingClientRect();"
+            " if (!r.width || !r.height) return {found: false};"
+            " return {found: true, x: r.left + r.width / 2, y: r.top + r.height / 2,"
+            "         label: (el.getAttribute('title') || el.textContent || '').trim().slice(0, 60)}; })()"
+        ) or {}
+        if not box.get("found"):
+            return {"clicked": False, **box}
+        self.mouse_click(box["x"], box["y"])
+        return {"clicked": True, "label": box.get("label"), "x": box["x"], "y": box["y"]}
+
     def screenshot(self, path) -> None:
         self._cdp.call("Page.bringToFront")
         time.sleep(0.3)
