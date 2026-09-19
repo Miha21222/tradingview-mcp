@@ -116,6 +116,11 @@ def test_coverage_stale_last_bar():
 
 def test_empty_df_and_inferred_timeframe():
     assert L.check_levels(_df([]), [{"name": "x", "price": 1}], T0)[0]["coverage_warning"] == "no bars loaded"
+    # bars WERE loaded but every one is older than since (daily chart on a Saturday)
+    [r] = L.check_levels(_df([]), [{"name": "x", "price": 1}], T0,
+                         last_loaded=int((T0 - pd.Timedelta(days=1)).timestamp()))
+    assert r["coverage_warning"] == ("no bars at or after since=2026-09-18T13:00:00Z "
+                                     "(last loaded bar 2026-09-17T13:00:00Z)")
     df = _df([(1, 2, 0, 1)] * 3, minutes=60)
     [r] = L.check_levels(df, [{"name": "x", "price": 1}], T0, now=T0 + pd.Timedelta(hours=2, minutes=100))
     assert r["coverage_warning"] is None  # inferred 60m: 100 min < 2x60

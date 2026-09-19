@@ -472,10 +472,11 @@ _BARS_JS = """
   const fin = (x) => (typeof x === 'number' && Number.isFinite(x)) ? x : null;
   const b = ms.bars();
   const fi = b.firstIndex(), li = b.lastIndex();
-  let rows = [];
+  let rows = [], latest = null;
   for (let i = fi; i <= li; i++) {
     const v = b.valueAt(i);
     if (!v) continue;
+    if (typeof v[0] === 'number') latest = v[0];
     if (p.since != null && v[0] < p.since) continue;
     rows.push([v[0], fin(v[1]), fin(v[2]), fin(v[3]), fin(v[4]), fin(v[5])]);
   }
@@ -484,7 +485,7 @@ _BARS_JS = """
   let sym = null, res = null;
   try { sym = ch.symbol(); res = String(ch.resolution()); } catch (e) {}
   resolve({symbol: sym, resolution: res, rows: rows, total_after_since: total,
-           loaded_bars: b.size(), earliest_loaded: pg.earliest,
+           loaded_bars: b.size(), earliest_loaded: pg.earliest, latest_loaded: latest,
            pages_loaded: pg.pages, history_exhausted: pg.exhausted,
            clamped: p.since != null && pg.earliest != null && pg.earliest > p.since});
 }))
@@ -496,7 +497,8 @@ def read_bars(page, count: int, since_ts: int | None = None, max_pages: int = 25
 
     `since_ts` (unix seconds) pages history back until that time is loaded
     (or the feed runs out - `clamped`), then keeps the last `count` rows at or
-    after it.
+    after it. `latest_loaded` is the newest bar BEFORE the since filter, so a
+    caller can tell "nothing after since" from "nothing loaded".
     """
     payload = {"count": int(count), "since": since_ts, "max_pages": max_pages}
     res = page.eval(_paging_js(_BARS_JS, payload), await_promise=True)

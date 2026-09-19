@@ -222,6 +222,19 @@ def test_desktop_check_levels_end_to_end(tmp_path):
     assert far["tagged"] is False and far["closest_approach"]["side"] == "below"
     assert far["closest_approach"]["distance"] == pytest.approx(200 - 109.5)
     assert "stale" in ibh["coverage_warning"]  # 2023 bars vs now
+    assert data["latest_loaded"] == 1_700_000_000 + 9 * 900
+
+
+def test_desktop_check_levels_names_last_bar_when_none_after_since(tmp_path):
+    page = FakePage(symbol="CME_MINI:ES1!", interval="1D")
+    page.bars = _bars()  # all in 2023
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_check_levels", {
+        "levels": [{"name": "IBH", "price": 104.4}], "since": "2026-09-19T00:00:00Z"})
+    assert data["bars_checked"] == 0
+    w = data["levels"][0]["coverage_warning"]
+    assert w.startswith("no bars at or after since=2026-09-19T00:00:00Z (last loaded bar 2023-11-15T00:28:20Z)")
+    assert "no bars loaded" not in w
 
 
 def test_desktop_check_levels_registers_read_only(tmp_path):

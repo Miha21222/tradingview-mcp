@@ -293,7 +293,9 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
             "earliest_loaded": bars.get("earliest_loaded"),
             "pages_loaded": bars.get("pages_loaded"),
             "clamped": bars.get("clamped"),
-            "levels": levels_mod.check_levels(df, levels, since_ts, minutes),
+            "latest_loaded": bars.get("latest_loaded"),
+            "levels": levels_mod.check_levels(df, levels, since_ts, minutes,
+                                              last_loaded=bars.get("latest_loaded")),
         }
 
     if settings.read_only:

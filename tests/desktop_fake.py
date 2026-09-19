@@ -253,12 +253,13 @@ class FakePage:
                 return {"no_api": True}
             since = payload.get("since")
             earliest = self.bars[0][0] if self.bars else None
+            latest = self.bars[-1][0] if self.bars else None
             rows = [r for r in self.bars if since is None or r[0] >= since]
             total = len(rows)
             rows = rows[-payload["count"]:]
             return {"symbol": self.symbol, "resolution": self.interval, "rows": rows,
                     "total_after_since": total, "loaded_bars": len(self.bars),
-                    "earliest_loaded": earliest, "pages_loaded": 0,
+                    "earliest_loaded": earliest, "latest_loaded": latest, "pages_loaded": 0,
                     "history_exhausted": False,
                     "clamped": since is not None and earliest is not None and earliest > since}
         return {

@@ -139,14 +139,26 @@ def _infer_tf_minutes(times: pd.Series) -> int | None:
 
 def check_levels(df: pd.DataFrame, levels: list[dict], since_ts,
                  timeframe_minutes: int | None = None,
-                 now: datetime | None = None) -> list[dict]:
-    """Per level: {name, tagged, first_tag, closest_approach, coverage_warning}."""
+                 now: datetime | None = None,
+                 last_loaded=None) -> list[dict]:
+    """Per level: {name, tagged, first_tag, closest_approach, coverage_warning}.
+
+    `last_loaded` (unix seconds / datetime, optional): the newest bar the
+    caller had BEFORE filtering by `since`. When `df` is empty but bars were
+    loaded (daily chart on a Saturday with since = today), the warning names
+    that bar instead of claiming nothing loaded.
+    """
     norm = normalize_levels(levels)
     since = to_utc(since_ts)
     now_ts = to_utc(now) if now is not None else pd.Timestamp.now(tz="UTC")
     if df is None or len(df) == 0:
+        if last_loaded is not None:
+            msg = (f"no bars at or after since={_iso(since)} "
+                   f"(last loaded bar {_iso(to_utc(last_loaded))})")
+        else:
+            msg = "no bars loaded"
         base = [{"name": n["name"], "tagged": False, "first_tag": None,
-                 "closest_approach": None, "coverage_warning": "no bars loaded"}
+                 "closest_approach": None, "coverage_warning": msg}
                 for n in norm]
         return base
     d = df.copy()
