@@ -43,7 +43,11 @@ class Settings:
     oanda_api_key: str | None
     oanda_env: str  # "practice" | "live"
     session_id: str | None  # TV_SESSIONID cookie for the opt-in `session` toolset
-    cdp_url: str = "http://127.0.0.1:9222"  # TV_CDP_URL for the opt-in `desktop` toolset
+    # TV_CDP_URL for the opt-in `desktop` toolset. Default 9223, NOT the
+    # conventional 9222: other CDP tools commonly own 9222 and Chromium silently
+    # skips binding a busy port (the app then runs with no CDP at all).
+    cdp_url: str = "http://127.0.0.1:9223"
+    desktop_exe: str | None = None  # TV_DESKTOP_EXE: explicit TradingView.exe path for tv_desktop_launch
 
     def toolset_enabled(self, name: str) -> bool:
         return name in self.toolsets
@@ -95,5 +99,6 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         oanda_api_key=e.get("OANDA_API_KEY") or None,
         oanda_env=e.get("OANDA_ENV", "practice"),
         session_id=e.get("TV_SESSIONID") or None,
-        cdp_url=e.get("TV_CDP_URL", "http://127.0.0.1:9222"),
+        cdp_url=e.get("TV_CDP_URL", "http://127.0.0.1:9223"),
+        desktop_exe=e.get("TV_DESKTOP_EXE") or None,
     )

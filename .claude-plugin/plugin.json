@@ -59,7 +59,12 @@
     "TV_CDP_URL": {
       "type": "string",
       "title": "TradingView Desktop CDP URL",
-      "description": "e.g. http://127.0.0.1:9223 for the opt-in `desktop` toolset."
+      "description": "e.g. http://127.0.0.1:9223 for the opt-in `desktop` toolset (default 9223; 9222 is usually owned by another CDP tool)."
+    },
+    "TV_DESKTOP_EXE": {
+      "type": "string",
+      "title": "TradingView Desktop executable",
+      "description": "Optional. Full path to TradingView.exe (or TradingView.app on macOS) for tv_desktop_launch when auto-discovery (Store package, %LOCALAPPDATA%/Programs) fails."
     }
   },
   "mcpServers": {
@@ -83,7 +88,8 @@
         "TV_CHART_DIR": "${TV_CHART_DIR}",
         "TV_JOURNAL_DIR": "${TV_JOURNAL_DIR}",
         "TV_STRATEGY_DIR": "${TV_STRATEGY_DIR}",
-        "TV_CDP_URL": "${TV_CDP_URL}"
+        "TV_CDP_URL": "${TV_CDP_URL}",
+        "TV_DESKTOP_EXE": "${TV_DESKTOP_EXE}"
       }
     },
     "mcp-tradingview": {
