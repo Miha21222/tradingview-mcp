@@ -119,6 +119,7 @@ Claude Code plugin in own marketplace repo (bundles server + skills + hooks + `u
   - [x] `hybrid` toolset alias (`config.py`): drops `public`, keeps session/desktop opt-in; `tv_setup_doctor` moved out of the `public` gate (core, always registered)
   - [x] Distribution: `plugin.json` + `.mcp.json` register `mcp-tradingview` (type http) next to `tradingview`; plugin `TV_TOOLSETS` default = `hybrid`; contract tests for both
   - [x] `tradingview-hybrid` skill: per-job routing table, official beta capabilities/limits, pair setup, "do I need both" answer; `tvmcp-guide` / `market-screening` / README cross-link it
+  - [x] Agent-facing install path (2026-09-19): `AGENT_SETUP.md` (prereqs → clone → `uv sync` → health check → register both servers in Claude Code/plugin/other clients → OAuth handoff to the human → toolset choice → 5 smoke-test tool calls → report template → symptom table) and `scripts/healthcheck.py` (Python/uv/Node/Chromium/server boot/doctor/`claude mcp list`, `--json`, exit code); linked from README top and CLAUDE.md
   - Deferred by design: server-level bridging (official as a DataProvider) — would need the OAuth token from Claude Code's credential store; no data win over Dukascopy/session anyway
 
 ## Verification per milestone

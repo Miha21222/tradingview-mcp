@@ -2,6 +2,8 @@
 
 MCP server giving AI agents a TradingView-centric trading toolkit: screener queries, historical FX data, and — as milestones land — SMC/ICT pattern scanning, chart rendering with markup, backtesting, Pine tooling, and a bundle of companion Agent Skills.
 
+> **AI agents:** to install and verify this MCP for a human, follow [`AGENT_SETUP.md`](AGENT_SETUP.md) top to bottom (prerequisites → `uv sync` → `scripts/healthcheck.py` → register both servers → smoke tests → report).
+
 **Not affiliated with TradingView, Inc.** "TradingView", "Pine Script" and "Lightweight Charts" are trademarks of TradingView, Inc.
 
 ## Status
@@ -60,7 +62,7 @@ Claude Code: the repo's `.mcp.json` registers both servers automatically when yo
 | `OANDA_API_KEY` | — | Free practice-account key enables the OANDA provider |
 | `OANDA_ENV` | `practice` | `practice` or `live` |
 
-Run `uv run tv tv_setup_doctor` to check every prerequisite - each broken check returns the exact fix command.
+Run `uv run tv tv_setup_doctor` to check every prerequisite - each broken check returns the exact fix command. For a full install check in one command (Python/uv/Node/Chromium/server/doctor/MCP registration): `uv run python scripts/healthcheck.py` (`--json` for machines).
 
 ## TradingView Terms of Service
 
