@@ -83,6 +83,10 @@ class DesktopPage:
     def __init__(self, cdp: _Cdp):
         self._cdp = cdp
 
+    def call(self, method: str, params: dict | None = None) -> dict:
+        """Raw CDP call on this page's session (Browser.*, Page.*); ToolError on failure."""
+        return self._cdp.call(method, params)
+
     def eval(self, expr: str, await_promise: bool = False):
         params = {"expression": expr, "returnByValue": True}
         if await_promise:

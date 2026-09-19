@@ -85,6 +85,8 @@ _READ_TOOLS = {
     "tv_desktop_pine_list_scripts",
     "tv_desktop_ui_find_element",
     "tv_desktop_check_levels",
+    "tv_desktop_pine_find_exact",
+    "tv_desktop_pine_get_errors",
 }
 _WRITE_TOOLS = {
     "tv_desktop_launch",
@@ -104,6 +106,10 @@ _WRITE_TOOLS = {
     "tv_desktop_pine_compile",
     "tv_desktop_pine_save",
     "tv_desktop_pine_open_script",
+    "tv_desktop_workspace_prepare",
+    "tv_desktop_pine_replace_exact",
+    "tv_desktop_pine_save_as",
+    "tv_desktop_pine_build_and_backtest",
 }
 
 

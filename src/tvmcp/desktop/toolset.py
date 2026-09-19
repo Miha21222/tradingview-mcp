@@ -35,7 +35,8 @@ from pydantic import Field
 from ..config import Settings
 from ..symbols import resolve, resolve_timeframe
 from ..scan import levels as levels_mod
-from . import driver, launcher, pine_editor, replay, strategy_tester, ui
+from . import (driver, launcher, pine_build, pine_editor, replay, strategy_tester, ui,
+               workspace)
 from .warnings import warn_once
 
 _PROVIDER = "desktop"
@@ -233,6 +234,41 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
         warn_once()
         with pages(settings.cdp_url) as page:
             res = pine_editor.list_scripts(page)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_pine_find_exact(
+        needle: Annotated[str, Field(min_length=1, max_length=20_000, description=(
+            "Exact text to look for (line endings are normalized to the buffer's)"))],
+        expect_script: Annotated[str | None, Field(description=(
+            "Refuse unless the editor header / declared title equals this name"))] = None,
+    ) -> dict:
+        """Count exact occurrences of `needle` in the Pine Editor buffer (read-only).
+
+        Returns `occurrences`, their `positions` (line/column), the buffer's
+        `eol` (LF/CRLF), `sha256` of the whole text, and whether a saved
+        script is open. Use it before tv_desktop_pine_replace_exact to pin the
+        expected count and the sha, so the edit lands only on the text you
+        read.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = pine_editor.find_exact(page, needle, expect_script)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_pine_get_errors() -> dict:
+        """Read the Pine Editor's current compile markers without clicking anything.
+
+        Returns `ok`, `errors` and `warnings` (line/column/message from
+        Monaco) and `hints` - short explanations for the landmine errors this
+        project has hit (constant strategy() args, input.time defval, v6 bool
+        conditions, undeclared identifiers, outdated //@version). Hints are
+        attached only when there are errors.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = pine_editor.get_errors(page)
         return {"provider": _PROVIDER, **res}
 
     @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
@@ -569,6 +605,125 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
         return {"provider": _PROVIDER, **res}
 
     @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_workspace_prepare(
+        clear_studies: Annotated[str | bool, Field(description=(
+            "'none' (default) | 'strategies' (remove only strategy() scripts) | "
+            "'all' (every study - the user's indicators too); true = 'all'"))] = "none",
+        symbol: Annotated[str | None, Field(description=(
+            "Optional symbol to switch to (any alias)"))] = None,
+        timeframe: Annotated[str | None, Field(description=(
+            "Optional timeframe to switch to: M1 M5 M15 M30 H1 H4 D1"))] = None,
+    ) -> dict:
+        """Put the TradingView Desktop workspace into a known state for Pine work.
+
+        Restores a minimized window, dismisses blocking dialogs, docks a
+        floating Pine editor, opens the editor with staged recovery until a
+        live Monaco answers (`pine_editor_open`, `pine_editor_width`),
+        optionally removes strategies/all studies, optionally navigates.
+        Returns the chart's symbol/resolution, the studies left, what was
+        touched (`steps`, `cleared_studies`, `blocking_dialogs`) and a `note`
+        when the editor is collapsed (< 200 px - ask the user to drag the
+        splitter) or never mounted (ask them to click inside the code area).
+        Leaves the user's indicators alone unless clear_studies='all'.
+        """
+        warn_once()
+        sym = resolve(symbol).tv if symbol else None
+        res_key = driver._TF_KEYS[resolve_timeframe(timeframe).canonical] if timeframe else None
+        with pages(settings.cdp_url) as page:
+            res = workspace.prepare(page, clear_studies, sym, res_key)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_pine_replace_exact(
+        needle: Annotated[str, Field(min_length=1, max_length=20_000, description=(
+            "Exact text to replace (line endings normalized to the buffer's)"))],
+        replacement: Annotated[str, Field(max_length=20_000, description="New text")],
+        expected_occurrences: Annotated[int, Field(ge=1, le=500, description=(
+            "How many times `needle` must occur; any other count changes nothing"))] = 1,
+        expect_script: Annotated[str | None, Field(description=(
+            "Refuse unless the editor header / declared title equals this name"))] = None,
+        expect_source_sha256: Annotated[str | None, Field(description=(
+            "sha256 from tv_desktop_pine_get_source / find_exact; a different "
+            "buffer changes nothing"))] = None,
+        dry_run: Annotated[bool, Field(description="Report counts only, edit nothing")] = False,
+        overwrite_saved: Annotated[bool, Field(description=(
+            "Allow editing a SAVED script (auto-saved to the user's account as a "
+            "new version) - only with the user's explicit OK"))] = False,
+    ) -> dict:
+        """Surgical, undoable edit of the Pine Editor buffer by exact match.
+
+        Replaces every occurrence of `needle` through Monaco's edit stack
+        (Ctrl+Z works) only when the occurrence count equals
+        `expected_occurrences` and the optional sha matches; otherwise nothing
+        changes and the counts come back (`applied: false`, `reason`). Returns
+        occurrences before/after, sha256 before/after, `eol`, `positions`,
+        `verified` (read-back check). Refuses on a saved script without
+        `overwrite_saved` (autosave landmine). Then tv_desktop_pine_compile.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = pine_editor.replace_exact(
+                page, needle, replacement, expected_occurrences, expect_script,
+                expect_source_sha256, dry_run, overwrite_saved)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_pine_save_as(
+        name: Annotated[str, Field(min_length=1, max_length=120, description=(
+            "Script name to save under (an agent-owned copy)"))],
+    ) -> dict:
+        """Save the Pine Editor buffer under `name` as a verified, agent-owned script.
+
+        A saved script that is not `name` is copied through the editor menu
+        ("Make a copy" -> name dialog -> Save), never edited in place; an
+        unsaved buffer is saved via Ctrl+S / the menu and named. Verified only
+        when BOTH the editor header shows `name` AND the user's saved list
+        contains it - otherwise a ToolError explains what to do by hand.
+        Returns {saved, verified, via, header}.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = pine_editor.save_as(page, name)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_pine_build_and_backtest(
+        source: Annotated[str, Field(min_length=1, max_length=400_000,
+                                     description="Full Pine script text")],
+        name: Annotated[str, Field(min_length=1, max_length=120, description=(
+            "Agent-owned script name; reuse the SAME name on every rerun"))],
+        symbol: Annotated[str | None, Field(description="Optional symbol (any alias)")] = None,
+        timeframe: Annotated[str | None, Field(description=(
+            "Optional timeframe: M1 M5 M15 M30 H1 H4 D1"))] = None,
+        clear_studies: Annotated[str | bool, Field(description=(
+            "'strategies' (default: remove old strategy() scripts, keep the "
+            "user's indicators) | 'none' | 'all'"))] = "strategies",
+        max_wait_s: Annotated[int, Field(ge=5, le=90, description=(
+            "How long to wait for the Strategy Tester report"))] = 25,
+    ) -> dict:
+        """Build a Pine script on the live chart and read its backtest, in one call.
+
+        Stages (each in `steps` with timing): prepare the workspace -> make
+        sure the editor holds an agent-owned buffer (`script.mode`:
+        unsaved/own/copied/created - a foreign saved script is never edited)
+        -> set the source -> compile (EN/RU buttons, save/name dialogs, marker
+        settling) -> markers -> results. Never raises after connecting:
+        `ok: false` + `stage` + `error`. Compile errors return
+        `compile_errors` with `hints` and a note that a rerun with the SAME
+        name is safe; warnings never stop the run. strategy() scripts poll
+        the Strategy Tester up to `max_wait_s` (one recompile if the chart
+        lost the study); indicator() scripts return `results: null`. Always
+        compare `results.metrics.net_profit` with `buy_hold_return`.
+        """
+        warn_once()
+        sym = resolve(symbol).tv if symbol else None
+        res_key = driver._TF_KEYS[resolve_timeframe(timeframe).canonical] if timeframe else None
+        with pages(settings.cdp_url) as page:
+            res = pine_build.build_and_backtest(
+                page, source, name, sym, res_key, clear_studies, max_wait_s)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
     def tv_desktop_pine_set_source(
         source: Annotated[str, Field(min_length=1, max_length=400_000,
                                      description="Full Pine script text")],
@@ -592,19 +747,26 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
         return {"provider": _PROVIDER, **res}
 
     @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
-    def tv_desktop_pine_compile() -> dict:
+    def tv_desktop_pine_compile(
+        save_name: Annotated[str | None, Field(description=(
+            "Name to type if TradingView asks to save/name the script before "
+            "adding it to the chart (new scripts)"))] = None,
+    ) -> dict:
         """Compile the Pine Editor's script onto the live chart and return errors.
 
-        Clicks the editor's "Add to chart" / "Update on chart" button (Ctrl+Enter
-        fallback), waits, then returns Monaco's markers split into `errors` and
+        Clicks the editor's "Save and add to chart" / "Add to chart" / "Update
+        on chart" button (EN/RU, Ctrl+Enter fallback), answers the "save this
+        script before adding?" and name dialogs (`dialogs_handled`), waits for
+        Monaco's markers to settle, then returns them split into `errors` and
         `warnings` (line/column/message), `ok`, and whether a new study
-        appeared on the chart. Loop: fix the source, tv_desktop_pine_set_source,
-        tv_desktop_pine_compile, until `ok`. For a strategy(), follow with
-        tv_desktop_read_strategy.
+        appeared on the chart. Loop: fix the source, tv_desktop_pine_set_source
+        or tv_desktop_pine_replace_exact, tv_desktop_pine_compile, until `ok`.
+        For a strategy(), follow with tv_desktop_read_strategy - or run the
+        whole thing with tv_desktop_pine_build_and_backtest.
         """
         warn_once()
         with pages(settings.cdp_url) as page:
-            res = pine_editor.compile_on_chart(page)
+            res = pine_editor.compile_on_chart(page, save_name=save_name)
         return {"provider": _PROVIDER, **res}
 
     @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})

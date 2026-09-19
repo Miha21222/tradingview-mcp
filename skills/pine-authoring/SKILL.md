@@ -1,6 +1,6 @@
 ---
 name: pine-authoring
-description: "Author and iterate Pine Script v5 via TradingView's real compiler (tv_pine_compile). Use when writing or fixing Pine scripts, converting an idea into Pine, or debugging a compile error. Triggers: write Pine, compile Pine, fix Pine error, Pine script."
+description: "Author, compile and deploy Pine Script: server-side syntax checks with tv_pine_compile, then the one-call build pipeline tv_desktop_pine_build_and_backtest on the user's chart. Use when writing or fixing Pine, turning an idea into a strategy, deploying or backtesting one, or debugging a compile error. Triggers: write Pine, compile Pine, fix Pine error, build a strategy, backtest this strategy, deploy to TradingView."
 ---
 
 # Pine Script authoring with a compiler loop
@@ -64,16 +64,45 @@ assumptions. Before backtesting (in TradingView or by porting the rules to
 Compile-check the normalized script with `tv_pine_compile` first; then, if the
 user wants it on THEIR chart, push it through the desktop loop below.
 
-## Editor loop on the user's live chart (opt-in desktop tier)
+## Build pipeline on the user's live chart (opt-in desktop tier)
 
-`tv_desktop_pine_set_source` → `tv_desktop_pine_compile` (Monaco `errors` with
-line/column, `study_added`) → fix → repeat; `tv_desktop_pine_save` only when the
-user wants it kept; `tv_desktop_read_strategy` for the Strategy Tester report
-(always quote `buy_hold_return` next to `net_profit`). Two rules: (1) a saved
-script open in the editor is auto-saved to the user's account the moment its text
-changes — the set tool refuses without `overwrite_saved=true`; get a yes first or
-have them open a new blank script; (2) `tv_pine_compile` (server-side) is the
-cheap syntax check — do not burn the user's editor on typos.
+One call does the whole deploy:
+
+`tv_desktop_pine_build_and_backtest(source, name, symbol?, timeframe?, clear_studies="strategies")`
+
+It prepares the workspace, protects the user's own scripts, injects the source,
+compiles, and reads the Strategy Tester report. It does not raise once connected —
+read `ok` and `stage` (`prepare | own_copy | set_source | compile | markers |
+results`) and act:
+
+- `stage: "markers"` — `compile_errors` carry line/column, `hints` carry up to
+  three landmine-derived fixes. Fix the source and call again **with the same
+  `name`**; the rerun is safe. `compile_warnings` never stop a build — never loop
+  on a warning.
+- `results: null` with a note — the source declares `indicator()`, so there is no
+  backtest to read. An `ok: true` with empty results and a `fragile` note means
+  the strategy did not attach; say so instead of inventing numbers.
+- Always quote `buy_hold_return` next to `net_profit` from `results`.
+
+Rules that the tools enforce, and you should not fight:
+
+1. **Never overwrite the user's saved script.** When a different saved script is
+   open, the pipeline makes a verified copy (header switched *and* the script
+   present in the account's saved list) or starts a new one. A blocked
+   `set_source` means exactly that — do not pass `overwrite_saved=true` to get
+   past it without the user's explicit yes.
+2. **Parameter changes are not rebuilds.** Use `tv_desktop_set_study_inputs`
+   (read back after writing), rebuild only for logic changes.
+3. **Small edits on a long script are surgical**:
+   `tv_desktop_pine_find_exact(needle)` → check `occurrences` →
+   `tv_desktop_pine_replace_exact(needle, replacement, expected_occurrences,
+   expect_source_sha256)` → compile. The tools normalize line endings to the
+   buffer's own and verify byte-exactly; a mismatch changes nothing.
+4. `tv_pine_compile` (server-side, no chart) is the cheap syntax check — do not
+   burn the user's editor on typos. `tv_desktop_pine_get_errors` re-reads the
+   markers without clicking anything; never click the editor's error widget.
+5. `clear_studies` defaults to `strategies` — the user's indicators stay. Pass
+   `all` only when they asked for a clean chart.
 
 ## Error reading
 

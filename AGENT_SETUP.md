@@ -274,7 +274,7 @@ configure — then rerun `scripts/healthcheck.py`.
 TradingView MCP install — <date>
 - repo: <path>, commit <sha>, uv sync OK, Chromium OK
 - healthcheck: OK (optional missing: OANDA key, TV cookie, Desktop CDP)
-- registered: tradingview (hybrid, 17 tools; +29 desktop tools if the tier was requested) ✔ · mcp-tradingview ✔ / needs your /mcp sign-in
+- registered: tradingview (hybrid, 17 tools; +35 desktop tools if the tier was requested) ✔ · mcp-tradingview ✔ / needs your /mcp sign-in
 - smoke tests: doctor ✔ · bars ✔ · fvg ✔ · chart ✔ · official ohlcv ✔/skipped
 - next for you: <one line: e.g. "run /mcp → mcp-tradingview → sign in">
 ```

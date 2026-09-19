@@ -109,6 +109,13 @@ commands. This table covers everything else, per toolset.
 | pine_set_source "holds one of the user's SAVED scripts" | Editing a saved script auto-saves a new version to the account | Ask the user; `overwrite_saved=true` only after a yes, or have them open a new blank script |
 | pine_compile `clicked: "Ctrl+Enter"` and nothing changed | Panel buttons not found (new locale/build) and the shortcut missed the editor | Ask the user to click "Add to chart" once; report the locale so the button matcher gets it |
 | pine_save "save dialog opened but its Save button was not found" | New unnamed script — the name dialog needs a name | Ask the user to name/save it once; later saves are silent |
+| build_and_backtest `stage: "markers"` | Real compile errors | Fix the source, call again with the SAME name; `hints` carry the three most likely fixes. Warnings alone never stop a build |
+| build_and_backtest `stage: "own_copy"` | A different saved script is open and the copy could not be verified | Ask the user to open a blank script, or to confirm before anything writes into theirs |
+| build_and_backtest `ok: true`, empty results, `fragile` note | The strategy did not attach within the wait | Say so; do not quote numbers. Raise `max_wait_s`, or ask the user to add it once by hand |
+| workspace_prepare note "panel collapsed (Npx)" | Pine panel under 200 px — buttons collapse to icons | Ask the user to drag the splitter wider before building |
+| workspace_prepare note "never mounted a live Monaco" | Editor container without a live editor instance | Ask the user to click once inside the Pine editor code area, then retry once |
+| replace_exact `applied: false` with counts | Occurrence count, script name or source hash did not match | Nothing changed by design — re-read with `find_exact` (and `get_source` for a fresh `sha256`), then retry |
+| Zero trades twice in a row | Structural: margin, session, date window, or no bars loaded | Stop re-polling; add debug counters to the Pine before guessing |
 
 ## Everywhere
 

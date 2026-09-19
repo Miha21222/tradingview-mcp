@@ -32,7 +32,7 @@ always.
 | `journal` | `tv_journal_scan/parse` | FX Replay CSV exports | none |
 | `pine` | `tv_pine_compile` | network | low (undocumented endpoint) |
 | `session` | `tv_session_status/ohlcv/realtime` | `TV_SESSIONID` cookie | **yes — user's account** |
-| `desktop` | 29 desktop tools: `tv_desktop_launch`, `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor, `tv_desktop_ui_find_element/ui_click`, `tv_desktop_check_levels` | app running with CDP (`tv_desktop_launch` starts it) | **yes — user's account** |
+| `desktop` | 35 desktop tools: `tv_desktop_launch`, `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor, `tv_desktop_ui_find_element/ui_click`, `tv_desktop_check_levels`, `tv_desktop_workspace_prepare`, `tv_desktop_pine_build_and_backtest`, `pine_find_exact/replace_exact/save_as/get_errors` | app running with CDP (`tv_desktop_launch` starts it) | **yes — user's account** |
 
 Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything;
 `hybrid` = data+scan+chart+backtest+pine+journal+strategy — the surface the official
@@ -68,8 +68,10 @@ load `tradingview-hybrid`.
 - "Show/drive my actual TradingView" → the desktop tools (opt-in): `tv_desktop_status`,
   `tv_desktop_screenshot`, `tv_desktop_set_symbol`/`set_timeframe`/`scroll_to_date`;
   "what does my indicator show" → `tv_desktop_list_studies` + `read_study_*`;
-  "change its settings" → `tv_desktop_set_study_inputs`; "backtest on my chart" →
-  Pine Editor loop (`tv_desktop_pine_set_source` → `pine_compile`) + `tv_desktop_read_strategy`;
+  "change its settings" → `tv_desktop_set_study_inputs`; "build/backtest a strategy on my chart" →
+  `tv_desktop_pine_build_and_backtest` (one call: prepare, own-copy protection,
+  inject, compile, Strategy Tester read); surgical fixes via
+  `tv_desktop_pine_find_exact`/`replace_exact`;
   "walk me through that day" → `tv_desktop_replay_start/step/stop`;
   "has price tagged my level since the open" → `tv_scan_check_levels` (free feed)
   or `tv_desktop_check_levels` (the chart's own bars); "the app isn't running" →
