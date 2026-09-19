@@ -168,6 +168,22 @@ def scan_liquidity(
     return out
 
 
+# Fixed-UTC session windows (HH:MM start, end) - mirrors the default table
+# inside the pinned smartmoneyconcepts 0.0.27 `smc.sessions`, which
+# `scan_sessions` / tv_scan_sessions use. NOT DST-aware: London/New York
+# hours drift by one hour across the summer, by design of the library.
+SESSION_WINDOWS_UTC: dict[str, tuple[str, str]] = {
+    "Sydney": ("21:00", "06:00"),
+    "Tokyo": ("00:00", "09:00"),
+    "London": ("07:00", "16:00"),
+    "New York": ("13:00", "22:00"),
+    "Asian kill zone": ("00:00", "04:00"),
+    "London open kill zone": ("06:00", "09:00"),
+    "New York kill zone": ("11:00", "14:00"),
+    "london close kill zone": ("14:00", "16:00"),
+}
+
+
 def scan_sessions(
     df: pd.DataFrame,
     session: str,

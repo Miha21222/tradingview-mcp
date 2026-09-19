@@ -1,4 +1,4 @@
-"""`scan` toolset: SMC/ICT pattern detection (FVG, OB, structure, liquidity, sessions, prev H/L).
+"""`scan` toolset: SMC/ICT pattern detection (FVG, OB, structure, liquidity, sessions, prev H/L, level tags).
 
 Wraps the pinned `smartmoneyconcepts` (0.0.27) through pure adapters in
 `scan/detectors.py`. Bars are loaded via the shared service in `tvmcp/bars.py`
@@ -27,6 +27,7 @@ from ..cache import BarCache
 from ..config import Settings
 from ..symbols import resolve, resolve_timeframe
 from . import detectors
+from . import levels as levels_mod
 
 _MAX_RESULTS = 100
 
@@ -186,6 +187,37 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         out["session"] = res["session"]
         out["time_zone"] = res["time_zone"]
         out["blocks"] = shown
+        return out
+
+    @mcp.tool(tags={"scan"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_scan_check_levels(
+        symbol: Annotated[str, Field(description="Any alias: EURUSD, OANDA:EURUSD, EUR_USD, eurusd")],
+        timeframe: Annotated[str, Field(description="M1, M5, M15, M30, H1, H4, D1")],
+        levels: Annotated[list[dict], Field(description=(
+            "Levels to check, each {'name': str, 'price': float} or "
+            "{'name': str, 'high': float, 'low': float} (zone); max 50"))],
+        since: Annotated[str, Field(description=(
+            "ISO-8601 UTC time (2026-09-19T13:30:00Z) or session:<name>[@YYYY-MM-DD] "
+            "(Sydney, Tokyo, London, New York, Asian kill zone, London open kill zone, "
+            "New York kill zone, london close kill zone; fixed UTC hours, not DST-aware)"))],
+        count: Annotated[int, Field(description="Number of most-recent bars to load", ge=50)] = 500,
+        provider: Annotated[str, Field(description="auto | dukascopy | oanda")] = "auto",
+    ) -> dict:
+        """Has price tagged each level/zone since a time? First touch, side, closest approach.
+
+        A bar tags a level when its range overlaps it. Per level: `tagged`,
+        `first_tag` {time, from: below|above|inside (side of the prior close),
+        high, low}, `closest_approach` {distance, time, side} when untagged,
+        and `coverage_warning` whenever the loaded bars cannot answer honestly
+        (history starts after `since`, no bars after `since`, last bar stale).
+        Levels are feed-specific: the result names the `provider`. For the
+        live TradingView chart's own bars use tv_desktop_check_levels.
+        """
+        sym, tf, df = load(symbol, timeframe, count, provider)
+        since_ts = levels_mod.parse_since(since, tf.minutes)
+        out = _base(sym, tf, df, provider, "check_levels", {"since": since})
+        out["since"] = since_ts.isoformat().replace("+00:00", "Z")
+        out["levels"] = levels_mod.check_levels(df, levels, since_ts, tf.minutes)
         return out
 
     @mcp.tool(tags={"scan"}, annotations={"readOnlyHint": True, "openWorldHint": True})
