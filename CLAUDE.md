@@ -4,7 +4,7 @@ TradingView MCP server for AI agents: market data, SMC/ICT pattern scanning, cha
 
 **Installing or verifying this MCP for a user? Follow `AGENT_SETUP.md` step by step** (health check: `uv run python scripts/healthcheck.py`).
 
-**Read `docs/PLAN.md` before doing anything substantive.** It holds the full architecture, the milestone tracker (M0–M5), and the design decisions with their rationale. The deep research behind the design lives in the owner's private notes (not in this repo).
+**Read `docs/PLAN.md` before doing anything substantive.** It holds the full architecture, the milestone tracker (M0–M7), and the design decisions with their rationale. The deep research behind the design lives in the owner's private notes (not in this repo).
 
 ## Current status
 

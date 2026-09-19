@@ -32,7 +32,7 @@ always.
 | `journal` | `tv_journal_scan/parse` | FX Replay CSV exports | none |
 | `pine` | `tv_pine_compile` | network | low (undocumented endpoint) |
 | `session` | `tv_session_status/ohlcv/realtime` | `TV_SESSIONID` cookie | **yes — user's account** |
-| `desktop` | `tv_desktop_status/screenshot/set_symbol/set_timeframe` | app running with CDP | **yes — user's account** |
+| `desktop` | 25 desktop tools: `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor | app running with CDP | **yes — user's account** |
 
 Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything;
 `hybrid` = data+scan+chart+backtest+pine+journal+strategy — the surface the official
@@ -65,7 +65,13 @@ load `tradingview-hybrid`.
   spec + `tv_strategy_run`.
 - "Check my Pine script" → `tv_pine_compile` in a write-compile-fix loop.
 - "What did I trade" → `tv_journal_scan` → `tv_journal_parse`.
-- "Show/drive my actual TradingView" → the desktop tools (`tv_desktop_status`, `tv_desktop_screenshot`, `tv_desktop_set_symbol`, `tv_desktop_set_timeframe`; opt-in).
+- "Show/drive my actual TradingView" → the desktop tools (opt-in): `tv_desktop_status`,
+  `tv_desktop_screenshot`, `tv_desktop_set_symbol`/`set_timeframe`/`scroll_to_date`;
+  "what does my indicator show" → `tv_desktop_list_studies` + `read_study_*`;
+  "change its settings" → `tv_desktop_set_study_inputs`; "backtest on my chart" →
+  Pine Editor loop (`tv_desktop_pine_set_source` → `pine_compile`) + `tv_desktop_read_strategy`;
+  "walk me through that day" → `tv_desktop_replay_start/step/stop`. Details: the
+  `tradingview-tiers` skill.
 
 ## Guiding a user from zero (the full path)
 

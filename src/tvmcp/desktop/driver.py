@@ -45,7 +45,9 @@ _STATUS_JS = """
 _KEYS = {
     "Enter": {"key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13, "text": "\r"},
     "Escape": {"key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27},
+    "s": {"key": "s", "code": "KeyS", "windowsVirtualKeyCode": 83},
 }
+CTRL = 2  # CDP Input.dispatchKeyEvent modifier bit for Ctrl
 
 
 class _Cdp:
@@ -96,8 +98,11 @@ class DesktopPage:
             self._cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", "key": ch})
             time.sleep(0.03)
 
-    def press(self, key: str) -> None:
-        spec = _KEYS[key]
+    def press(self, key: str, modifiers: int = 0) -> None:
+        spec = dict(_KEYS[key])
+        if modifiers:
+            spec["modifiers"] = modifiers
+            spec.pop("text", None)  # Ctrl+key is a shortcut, not typed text
         self._cdp.call("Input.dispatchKeyEvent", {"type": "keyDown", **spec})
         self._cdp.call("Input.dispatchKeyEvent", {"type": "keyUp", **{k: v for k, v in spec.items() if k != "text"}})
 
@@ -175,25 +180,171 @@ def screenshot(page, out_path) -> None:
     page.screenshot(out_path)
 
 
+# --- navigation ---------------------------------------------------------------
+#
+# Preferred path (M7, borrowed from tradesdontlie/tradingview-mcp chart.js):
+# the in-page charting API `activeChart().setSymbol(sym, {})` /
+# `setResolution(res, {})`, then wait in-page until the chart reports the
+# requested symbol/resolution with no loading spinner for 3 consecutive polls.
+# Fallback when TradingViewApi is not exposed: the old keyboard quick-search.
+
+_NAV_JS = """
+/*tvmcp:nav*/
+(new Promise(async (resolve) => {
+  if (!window.TradingViewApi) return resolve({no_api: true});
+  const p = __PAYLOAD__;
+  const ch = window.TradingViewApi.activeChart();
+  const norm = (r) => String(r || '').toUpperCase().replace(/^1([DWM])$/, '$1');
+  try {
+    if (p.symbol != null) ch.setSymbol(p.symbol, {});
+    if (p.resolution != null) ch.setResolution(p.resolution, {});
+  } catch (e) { return resolve({error: String(e)}); }
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const spinning = () => {
+    const el = document.querySelector('[class*="loader"], [data-name="loading"]');
+    return !!(el && el.offsetParent !== null);
+  };
+  const wantSym = p.symbol == null ? null : p.symbol.toUpperCase().split(':').pop();
+  let last = null, stable = 0;
+  const t0 = Date.now();
+  while (Date.now() - t0 < p.timeout_ms) {
+    await sleep(200);
+    let sym, res;
+    try { sym = ch.symbol(); res = ch.resolution(); } catch (e) { stable = 0; continue; }
+    const ok = (wantSym == null || String(sym).toUpperCase().replace(/:/g, '').endsWith(wantSym))
+      && (p.resolution == null || norm(res) === norm(p.resolution));
+    if (!ok || spinning()) { stable = 0; continue; }
+    const sig = sym + '|' + res;
+    if (sig === last) stable++; else { stable = 0; last = sig; }
+    if (stable >= 3) break;
+  }
+  let sym = null, res = null;
+  try { sym = ch.symbol(); res = ch.resolution(); } catch (e) {}
+  resolve({api_symbol: sym, api_resolution: res, ready: stable >= 3,
+           waited_ms: Date.now() - t0});
+}))
+"""
+
+
+def _nav(page, symbol: str | None, resolution: str | None, timeout_ms: int = 8000) -> dict:
+    payload = {"symbol": symbol, "resolution": resolution, "timeout_ms": timeout_ms}
+    res = page.eval(_NAV_JS.replace("__PAYLOAD__", json.dumps(payload)), await_promise=True)
+    if not res or res.get("no_api"):
+        return {"no_api": True}
+    if res.get("error"):
+        raise ToolError(f"TradingView chart API rejected the change: {res['error']}")
+    return res
+
+
 def set_symbol(page, tv_symbol: str) -> dict:
-    """Type the symbol into TV's quick search and confirm; return new status."""
-    page.press("Escape")  # close any open dialog first
-    page.type_text(tv_symbol)
-    time.sleep(0.8)  # let the symbol-search overlay resolve the ticker
-    page.press("Enter")
-    time.sleep(1.5)  # chart reload
-    return read_status(page)
+    """Switch symbol via the chart API (keyboard quick-search as fallback)."""
+    nav = _nav(page, tv_symbol, None)
+    if nav.get("no_api"):
+        page.press("Escape")  # close any open dialog first
+        page.type_text(tv_symbol)
+        time.sleep(0.8)  # let the symbol-search overlay resolve the ticker
+        page.press("Enter")
+        time.sleep(1.5)  # chart reload
+        return {"method": "keyboard", **read_status(page)}
+    return {"method": "api", **nav, **read_status(page)}
 
 
 def set_timeframe(page, canonical_tf: str) -> dict:
-    """Type the interval quick-key (e.g. '15', '240', '1D') and confirm."""
+    """Switch resolution via the chart API (interval quick-type as fallback)."""
     key = _TF_KEYS[canonical_tf]
-    page.press("Escape")
-    page.type_text(key)
-    time.sleep(0.5)
-    page.press("Enter")
-    time.sleep(1.0)
-    return read_status(page)
+    nav = _nav(page, None, key)
+    if nav.get("no_api"):
+        page.press("Escape")
+        page.type_text(key)
+        time.sleep(0.5)
+        page.press("Enter")
+        time.sleep(1.0)
+        return {"method": "keyboard", **read_status(page)}
+    return {"method": "api", **nav, **read_status(page)}
+
+
+# --- viewport (scroll to a date / set the visible range) ----------------------
+#
+# The chart lazy-loads ~300 bars; a range older than the loaded history clamps
+# silently. So page back with `mainSeries().requestMoreData(1000)` while
+# `requestMoreDataAvailable()` and the earliest loaded bar is still newer than
+# `from`, then `timeScale().zoomToBarsRange` (the public `setVisibleRange`
+# throws "Not implemented" in the desktop build). Borrowed from tradesdontlie
+# chart.js.
+
+_VIEWPORT_JS = """
+/*tvmcp:viewport*/
+(new Promise(async (resolve) => {
+  if (!window.TradingViewApi) return resolve({no_api: true});
+  const p = __PAYLOAD__;
+  const ch = window.TradingViewApi.activeChart();
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  let ms = null;
+  try { ms = ch._chartWidget.model().mainSeries(); } catch (e) {}
+  let pages = 0, earliest = null, exhausted = false;
+  for (let i = 0; ms && i < p.max_pages; i++) {
+    const b = ms.bars();
+    const fv = b.valueAt(b.firstIndex());
+    earliest = fv ? fv[0] : null;
+    let more = true;
+    try { more = ms.requestMoreDataAvailable(); } catch (e) {}
+    if (earliest == null || earliest <= p.from) break;
+    if (!more) { exhausted = true; break; }
+    const before = b.firstIndex();
+    try { ms.requestMoreData(1000); } catch (e) { break; }
+    pages++;
+    for (let j = 0; j < 20; j++) {
+      await sleep(200);
+      if (ms.bars().firstIndex() !== before) break;
+    }
+  }
+  if (ms) { try { const fv = ms.bars().valueAt(ms.bars().firstIndex()); earliest = fv ? fv[0] : earliest; } catch (e) {} }
+  // `setVisibleRange` is the public charting API but throws "Not implemented"
+  // in the desktop build (verified 2026-09-19) - zoom by bar index instead.
+  let method = 'zoomToBarsRange';
+  try {
+    const m = ch._chartWidget.model();
+    const bars = m.mainSeries().bars();
+    const fi = bars.firstIndex(), li = bars.lastIndex();
+    let fromIdx = fi, toIdx = li, seenFrom = false;
+    for (let i = fi; i <= li; i++) {
+      const v = bars.valueAt(i);
+      if (!v) continue;
+      if (!seenFrom && v[0] >= p.from) { fromIdx = i; seenFrom = true; }
+      if (v[0] <= p.to) toIdx = i;
+    }
+    m.timeScale().zoomToBarsRange(fromIdx, toIdx);
+  } catch (e) {
+    method = 'setVisibleRange';
+    try { await ch.setVisibleRange({from: p.from, to: p.to}); }
+    catch (e2) { return resolve({error: String(e) + ' / ' + String(e2)}); }
+  }
+  await sleep(400);
+  let vis = null;
+  try { vis = ch.getVisibleRange(); } catch (e) {}
+  resolve({requested: {from: p.from, to: p.to}, visible: vis, method: method,
+           pages_loaded: pages, earliest_loaded: earliest,
+           history_exhausted: exhausted,
+           clamped: earliest != null && earliest > p.from});
+}))
+"""
+
+
+def set_visible_range(page, from_time: int, to_time: int, max_pages: int = 25) -> dict:
+    payload = {"from": from_time, "to": to_time, "max_pages": max_pages}
+    res = page.eval(_VIEWPORT_JS.replace("__PAYLOAD__", json.dumps(payload)),
+                    await_promise=True)
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    if res.get("error"):
+        raise ToolError(f"Could not set the visible range: {res['error']}")
+    return res
+
+
+def scroll_to_date(page, center_time: int, bars_each_side: int, resolution_minutes: int) -> dict:
+    half = bars_each_side * resolution_minutes * 60
+    res = set_visible_range(page, center_time - half, center_time + half)
+    return {"centered_on": center_time, "bars_each_side": bars_each_side, **res}
 
 
 # --- drawings (via the in-page charting-library API, not UI clicks) ---------
@@ -551,6 +702,40 @@ _READ_GRAPHICS_JS = """
   const pc = model.graphics()._primitivesCollection;
   const out = {id: s.id, title: s.name, counts: {}};
   if (timeErr) out.time_mapping_error = timeErr;
+  if (p.compact) {
+    // Compact mode (borrowed from tradesdontlie data.js): horizontal lines
+    // collapse to unique price levels, boxes to unique {high, low} zones.
+    const round = (v) => Math.round(v * 1e8) / 1e8;
+    const lv = new Map();
+    for (const st of stores(pc.dwglines)) for (const l of st.values()) {
+      if (!Number.isFinite(l.y1) || l.y1 !== l.y2) continue;
+      const k = round(l.y1);
+      const e = lv.get(k) || {price: k, count: 0, last_time: null};
+      e.count++;
+      const tt = t(l.x2);
+      if (tt != null && (e.last_time == null || tt > e.last_time)) e.last_time = tt;
+      lv.set(k, e);
+    }
+    const zn = new Map();
+    for (const st of stores(pc.dwgboxes)) for (const b of st.values()) {
+      if (!Number.isFinite(b.y1) || !Number.isFinite(b.y2)) continue;
+      const hi = round(Math.max(b.y1, b.y2)), lo = round(Math.min(b.y1, b.y2));
+      const k = hi + '|' + lo;
+      const e = zn.get(k) || {high: hi, low: lo, count: 0, last_time: null, text: null};
+      e.count++;
+      const tt = t(b.x2);
+      if (tt != null && (e.last_time == null || tt > e.last_time)) e.last_time = tt;
+      if (b.t && !e.text) e.text = String(b.t).slice(0, 80);
+      zn.set(k, e);
+    }
+    let lines = 0, boxes = 0;
+    for (const st of stores(pc.dwglines)) lines += st.size;
+    for (const st of stores(pc.dwgboxes)) boxes += st.size;
+    out.counts = {lines: lines, boxes: boxes, levels: lv.size, zones: zn.size};
+    out.levels = [...lv.values()].sort((a, b) => b.price - a.price).slice(0, p.limit);
+    out.zones = [...zn.values()].sort((a, b) => b.high - a.high).slice(0, p.limit);
+    return out;
+  }
   const kinds = p.kinds;
   const take = (name, coll, map) => {
     if (kinds && !kinds.includes(name)) return;
@@ -618,8 +803,100 @@ def read_study_plots(page, query: str, count: int, nonempty_only: bool) -> dict:
     return _check_study_res(res, query)
 
 
-def read_study_graphics(page, query: str, limit: int, kinds: list[str] | None) -> dict:
+def read_study_graphics(page, query: str, limit: int, kinds: list[str] | None,
+                        compact: bool = False) -> dict:
     res = page.eval(_study_js(
-        _READ_GRAPHICS_JS, {"query": query, "limit": limit, "kinds": kinds},
+        _READ_GRAPHICS_JS,
+        {"query": query, "limit": limit, "kinds": kinds, "compact": compact},
     ))
     return _check_study_res(res, query)
+
+
+# --- study inputs (write) -----------------------------------------------------
+#
+# `getInputValues()` -> mutate `.value` -> `setInputValues(arr)` (charting API,
+# borrowed from tradesdontlie indicators.js). Inputs may be addressed by id or
+# by user-facing name (case-insensitive). The block reads the values back after
+# the write and reports mismatches - TradingView's own Copilot was caught
+# reporting "done" while the inputs stayed unchanged; never trust the write.
+
+_SET_INPUTS_JS = """
+/*tvmcp:inputs*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  __HELPERS__
+  const p = __PAYLOAD__;
+  const s = findStudy(p.query);
+  if (s.__miss) return s;
+  const api = ch.getStudyById(s.id);
+  const skip = {text: 1, pineId: 1, pineVersion: 1, pineFeatures: 1, __profile: 1};
+  const info = api.getInputsInfo().filter(i => !i.isHidden && !i.isFake && !skip[i.id]);
+  const byName = {};
+  for (const i of info) { byName[i.id.toLowerCase()] = i.id; if (i.name) byName[String(i.name).toLowerCase()] = i.id; }
+  const wanted = {}, unknown = [];
+  for (const k of Object.keys(p.inputs)) {
+    const id = byName[k.toLowerCase()];
+    if (id == null) unknown.push(k); else wanted[id] = p.inputs[k];
+  }
+  const cur = api.getInputValues();
+  const val = (v) => (typeof v === 'string' && v.length > 200) ? v.slice(0, 200) : (fin(v) ?? v ?? null);
+  if (unknown.length) {
+    const known = {};
+    for (const v of cur) known[v.id] = v.value;
+    return {id: s.id, title: s.name, unknown: unknown,
+            available: info.map(i => ({id: i.id, name: i.name, type: i.type, value: val(known[i.id])}))};
+  }
+  const before = {};
+  for (const v of cur) if (Object.prototype.hasOwnProperty.call(wanted, v.id)) {
+    before[v.id] = val(v.value);
+    v.value = wanted[v.id];
+  }
+  try { api.setInputValues(cur); } catch (e) { return {error: String(e)}; }
+  const after = {};
+  for (const v of api.getInputValues()) if (Object.prototype.hasOwnProperty.call(wanted, v.id)) after[v.id] = val(v.value);
+  const mismatched = Object.keys(wanted).filter(k => String(after[k]) !== String(wanted[k]));
+  return {id: s.id, title: s.name, before: before, after: after,
+          applied: !mismatched.length, mismatched: mismatched};
+})()
+"""
+
+
+def set_study_inputs(page, query: str, inputs: dict) -> dict:
+    res = page.eval(_study_js(_SET_INPUTS_JS, {"query": query, "inputs": inputs}))
+    res = _check_study_res(res, query)
+    if res.get("error"):
+        raise ToolError(f"TradingView rejected the input change: {res['error']}")
+    if res.get("unknown"):
+        avail = ", ".join(f"{a['id']} ({a['name']})" for a in res.get("available", []))
+        raise ToolError(
+            f"Unknown input(s) {res['unknown']} for study {res['title']!r}. "
+            f"Available inputs (id (name)): {avail or 'none visible'}."
+        )
+    return res
+
+
+_RESOLUTION_JS = """
+/*tvmcp:resolution*/
+(() => {
+  if (!window.TradingViewApi) return {no_api: true};
+  return {resolution: String(window.TradingViewApi.activeChart().resolution())};
+})()
+"""
+
+
+def resolution_to_minutes(res: str) -> int:
+    """TV resolution string ('15', '240', 'D', '1D', 'W', '1M', '30S') -> minutes."""
+    r = (res or "").strip().upper()
+    if r.endswith("S"):
+        return max(1, int(r[:-1] or 1) // 60)
+    units = {"D": 1440, "W": 10080, "M": 43200}
+    if r and r[-1] in units:
+        return int(r[:-1] or 1) * units[r[-1]]
+    return int(r) if r.isdigit() else 60
+
+
+def read_resolution_minutes(page) -> int:
+    res = page.eval(_RESOLUTION_JS)
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    return resolution_to_minutes(res.get("resolution"))

@@ -90,6 +90,18 @@ commands. This table covers everything else, per toolset.
 | Study query "matches no study" / "is ambiguous" | Wrong id or too-loose title substring | The error lists all present studies; use `tv_desktop_list_studies` and pass the id or a longer substring |
 | read_study_graphics times look off for old objects | Objects before loaded history get extrapolated times (bar-spacing based, session gaps ignored) | Scroll the chart left to load more history, or treat pre-history times as approximate |
 | read_study_graphics empty for an indicator that clearly plots | Indicator uses plot()/plotshape(), not Pine box/line/label objects | Use `tv_desktop_read_study_plots` (with `nonempty_only=true` for sparse signals) |
+| set_symbol/set_timeframe `ready: false` | Chart still loading after 8 s (slow feed) or the API resolved a different symbol | Check `api_symbol`/`api_resolution`; retry once; verify with `tv_desktop_screenshot` |
+| scroll_to_date / set_visible_range `clamped: true` | Feed history ended before `from` (plan limits) — `earliest_loaded` says where | Higher timeframe or a later date; don't loop |
+| set_study_inputs `applied: false`, names in `mismatched` | Value rejected silently (wrong type, out of range, option not in list) | Read the input's `type`/current value from `tv_desktop_list_studies`; pass the exact option text or a number of the right kind |
+| set_study_inputs "Unknown input(s)" | Id/name typo or hidden input | The error lists available inputs (id + name); use one of them |
+| read_strategy "No strategy() script is on the active chart" | Only indicators on the chart | Add one via the Pine Editor loop (`tv_desktop_pine_set_source` → `pine_compile`) |
+| read_strategy "report is not computed" | Panel never opened, wrong strategy selected in it, or strategy hidden | The tool opens the panel; ask the user to select/show the strategy in the Strategy Tester |
+| replay_start "did not start" | No data at that date on this timeframe | More recent date or higher timeframe |
+| replay_step `stepped` < `count` | Reached the end of data (cursor no longer moves) | Stop replay, or start earlier |
+| pine_* "Pine Editor is not reachable" | Panel did not mount, or TradingView moved the Monaco instance (app update) | Ask the user to open the Pine Editor tab by hand and retry; if it persists, `src/tvmcp/desktop/pine_editor.py` needs a new locator |
+| pine_set_source "holds one of the user's SAVED scripts" | Editing a saved script auto-saves a new version to the account | Ask the user; `overwrite_saved=true` only after a yes, or have them open a new blank script |
+| pine_compile `clicked: "Ctrl+Enter"` and nothing changed | Panel buttons not found (new locale/build) and the shortcut missed the editor | Ask the user to click "Add to chart" once; report the locale so the button matcher gets it |
+| pine_save "save dialog opened but its Save button was not found" | New unnamed script — the name dialog needs a name | Ask the user to name/save it once; later saves are silent |
 
 ## Everywhere
 

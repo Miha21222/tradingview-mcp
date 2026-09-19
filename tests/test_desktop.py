@@ -34,6 +34,22 @@ class FakePage:
         self.studies = studies if studies is not None else []
         self.study_payloads = []
         self._next_id = 0
+        # M7 fakes
+        self.api = True                      # chart API exposed (nav via API)
+        self.api_symbol_override = None      # what the API resolves a symbol to
+        self.nav = []
+        self.viewports = []
+        self.strategy = {"strategies": [], "report": None}
+        self.strategy_payloads = []
+        self.replay_state = {"available": True, "started": False, "autoplay": False,
+                             "mode": None, "current_date": None, "position": None,
+                             "realized_pnl": 0}
+        self.replay_calls = []
+        self.editor = ""                     # None = editor unreachable
+        self.markers = []
+        self.compile_button = "Add to chart"
+        self.scripts = [{"id": "abc", "name": "My SMC", "title": "My SMC",
+                         "version": 3, "modified": None, "kind": "study"}]
 
     def eval(self, expr, await_promise=False):
         self.exprs.append(expr)
@@ -63,6 +79,106 @@ class FakePage:
             return {"id": s["id"], "title": s["title"],
                     "counts": {"boxes": len(s.get("boxes", []))},
                     "boxes": s.get("boxes", [])[-payload["limit"]:]}
+        if "/*tvmcp:nav*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.nav.append(payload)
+            if not self.api:
+                return {"no_api": True}
+            if payload.get("symbol"):
+                self.symbol = self.api_symbol_override or payload["symbol"]
+            if payload.get("resolution"):
+                self.interval = payload["resolution"]
+            return {"api_symbol": self.symbol, "api_resolution": self.interval,
+                    "ready": True, "waited_ms": 600}
+        if "/*tvmcp:resolution*/" in expr:
+            return {"resolution": self.interval}
+        if "/*tvmcp:viewport*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.viewports.append(payload)
+            return {"requested": {"from": payload["from"], "to": payload["to"]},
+                    "visible": {"from": payload["from"], "to": payload["to"]},
+                    "method": "setVisibleRange", "pages_loaded": 2,
+                    "earliest_loaded": payload["from"] - 10,
+                    "history_exhausted": False, "clamped": False}
+        if "/*tvmcp:inputs*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.study_payloads.append(payload)
+            q = payload["query"]
+            matches = [st for st in self.studies
+                       if st["id"] == q or q.lower() in st["title"].lower()]
+            if len(matches) != 1:
+                return {"__miss": True, "not_found": not matches,
+                        "candidates": [{"id": st["id"], "title": st["title"]}
+                                       for st in self.studies]}
+            st = matches[0]
+            avail = st.get("inputs", {})
+            unknown = [k for k in payload["inputs"] if k not in avail]
+            if unknown:
+                return {"id": st["id"], "title": st["title"], "unknown": unknown,
+                        "available": [{"id": k, "name": k, "type": "integer", "value": v}
+                                      for k, v in avail.items()]}
+            before = {k: avail[k] for k in payload["inputs"]}
+            for k, v in payload["inputs"].items():
+                avail[k] = v if k != "stuck" else avail[k]
+            after = {k: avail[k] for k in payload["inputs"]}
+            mism = [k for k in payload["inputs"] if str(after[k]) != str(payload["inputs"][k])]
+            return {"id": st["id"], "title": st["title"], "before": before,
+                    "after": after, "applied": not mism, "mismatched": mism}
+        if "/*tvmcp:strategy*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.strategy_payloads.append(payload)
+            return self.strategy
+        if "/*tvmcp:replay*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.replay_calls.append(payload)
+            a = payload["action"]
+            if a == "start":
+                if payload.get("time_ms") == 1000:
+                    return {"error": "Replay did not start - the date may have no data"}
+                self.replay_state.update(started=True, current_date=payload.get("time_ms") or 1000)
+                return {"ok": True, "action": "started", **self.replay_state}
+            if a == "step":
+                if not self.replay_state["started"]:
+                    return {"error": "Replay is not started - call tv_desktop_replay_start first"}
+                self.replay_state["current_date"] += 60000 * payload["count"]
+                return {"ok": True, "action": "step", "requested": payload["count"],
+                        "stepped": payload["count"], **self.replay_state}
+            if a == "trade":
+                self.replay_state["position"] = {"side": payload["side"]}
+                return {"ok": True, "action": "trade", "side": payload["side"], **self.replay_state}
+            if a == "stop":
+                self.replay_state.update(started=False)
+                return {"ok": True, "action": "stopped", **self.replay_state}
+            return {"ok": True, **self.replay_state}
+        if "/*tvmcp:pine_open*/" in expr:
+            return {"ready": self.editor is not None, "opened": True}
+        if "/*tvmcp:pine_get*/" in expr:
+            if self.editor is None:
+                return {"no_editor": True}
+            return {"source": self.editor, "lines": self.editor.count("\n") + 1,
+                    "chars": len(self.editor), "markers": self.markers}
+        if "/*tvmcp:pine_set*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            self.editor = payload["source"]
+            return {"lines": 1, "chars": len(self.editor), "applied": True}
+        if "/*tvmcp:pine_click*/" in expr:
+            return {"clicked": self.compile_button, "studies_before": 2}
+        if "/*tvmcp:pine_result*/" in expr:
+            return {"markers": self.markers, "studies_after": 3 if not any(
+                m["severity"] == "error" for m in self.markers) else 2}
+        if "/*tvmcp:pine_save*/" in expr:
+            return {"dialog": False}
+        if "/*tvmcp:pine_list*/" in expr:
+            return {"scripts": self.scripts}
+        if "/*tvmcp:pine_open_script*/" in expr:
+            payload = json.loads(expr.split("const p = ", 1)[1].split(";", 1)[0])
+            q = payload["name"].lower()
+            m = [sc for sc in self.scripts if q in sc["name"].lower()]
+            if not m:
+                return {"not_found": True, "names": [sc["name"] for sc in self.scripts]}
+            self.editor = "//@version=6\nindicator('x')"
+            return {"name": m[0]["name"], "id": m[0]["id"], "version": 1,
+                    "lines": 2, "chars": len(self.editor)}
         if "/*tvmcp:list*/" in expr:
             return {
                 "symbol": self.symbol,
@@ -100,8 +216,9 @@ class FakePage:
     def type_text(self, text):
         self.typed.append(text)
 
-    def press(self, key):
+    def press(self, key, modifiers=0):
         self.pressed.append(key)
+        self.modifiers = modifiers
 
     def screenshot(self, path):
         self.shots.append(path)
@@ -161,34 +278,47 @@ def test_gating_off_by_default(tmp_path):
     assert not any(n.startswith("tv_desktop_") for n in names)
 
 
-def test_registers_ten_tools(tmp_path):
+_READ_TOOLS = {
+    "tv_desktop_status",
+    "tv_desktop_screenshot",
+    "tv_desktop_list_drawings",
+    "tv_desktop_list_studies",
+    "tv_desktop_read_study_plots",
+    "tv_desktop_read_study_graphics",
+    "tv_desktop_read_strategy",
+    "tv_desktop_replay_status",
+    "tv_desktop_pine_get_source",
+    "tv_desktop_pine_list_scripts",
+}
+_WRITE_TOOLS = {
+    "tv_desktop_set_symbol",
+    "tv_desktop_set_timeframe",
+    "tv_desktop_draw",
+    "tv_desktop_remove_drawing",
+    "tv_desktop_scroll_to_date",
+    "tv_desktop_set_visible_range",
+    "tv_desktop_set_study_inputs",
+    "tv_desktop_replay_start",
+    "tv_desktop_replay_step",
+    "tv_desktop_replay_trade",
+    "tv_desktop_replay_stop",
+    "tv_desktop_pine_set_source",
+    "tv_desktop_pine_compile",
+    "tv_desktop_pine_save",
+    "tv_desktop_pine_open_script",
+}
+
+
+def test_registers_all_desktop_tools(tmp_path):
     mcp, _ = _build(tmp_path)
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    assert names == {
-        "tv_desktop_status",
-        "tv_desktop_screenshot",
-        "tv_desktop_list_drawings",
-        "tv_desktop_list_studies",
-        "tv_desktop_read_study_plots",
-        "tv_desktop_read_study_graphics",
-        "tv_desktop_set_symbol",
-        "tv_desktop_set_timeframe",
-        "tv_desktop_draw",
-        "tv_desktop_remove_drawing",
-    }
+    assert names == _READ_TOOLS | _WRITE_TOOLS
 
 
 def test_read_only_excludes_navigation_and_writes(tmp_path):
     mcp, _ = _build(tmp_path, read_only=True)
     names = {t.name for t in asyncio.run(mcp.list_tools())}
-    assert names == {
-        "tv_desktop_status",
-        "tv_desktop_screenshot",
-        "tv_desktop_list_drawings",
-        "tv_desktop_list_studies",
-        "tv_desktop_read_study_plots",
-        "tv_desktop_read_study_graphics",
-    }
+    assert names == _READ_TOOLS
 
 
 def test_status_reads_ui(tmp_path, capsys):
@@ -215,27 +345,231 @@ def test_screenshot_writes_file(tmp_path):
     assert page.shots and str(page.shots[0]) == data["path"]
 
 
-def test_set_symbol_types_and_verifies(tmp_path):
+def test_set_symbol_uses_chart_api(tmp_path):
     page = FakePage(symbol="EURUSD")
     mcp, _ = _build(tmp_path, page)
     data = _data(mcp, "tv_desktop_set_symbol", {"symbol": "eurusd"})
     assert data["requested"] == "OANDA:EURUSD"
+    assert data["method"] == "api" and data["ready"] is True
+    assert page.nav[-1] == {"symbol": "OANDA:EURUSD", "resolution": None, "timeout_ms": 8000}
+    assert not page.typed  # no keyboard automation when the API is there
+
+
+def test_set_symbol_falls_back_to_keyboard(tmp_path):
+    page = FakePage(symbol="EURUSD")
+    page.api = False
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_set_symbol", {"symbol": "eurusd"})
+    assert data["method"] == "keyboard"
     assert "OANDA:EURUSD" in page.typed
     assert "Enter" in page.pressed
 
 
 def test_set_symbol_mismatch_raises(tmp_path):
     page = FakePage(symbol="AAPL")  # app resolved something else
+    page.api_symbol_override = "NASDAQ:AAPL"
     mcp, _ = _build(tmp_path, page)
     with pytest.raises(ToolError, match="different listing"):
         asyncio.run(mcp.call_tool("tv_desktop_set_symbol", {"symbol": "EURUSD"}))
 
 
-def test_set_timeframe_uses_quick_keys(tmp_path):
+def test_set_timeframe_uses_chart_api(tmp_path):
     mcp, page = _build(tmp_path)
     data = _data(mcp, "tv_desktop_set_timeframe", {"timeframe": "H4"})
     assert data["requested"] == "H4"
+    assert page.nav[-1]["resolution"] == "240"
+    assert data["api_resolution"] == "240"
+
+
+def test_set_timeframe_keyboard_fallback(tmp_path):
+    mcp, page = _build(tmp_path)
+    page.api = False
+    data = _data(mcp, "tv_desktop_set_timeframe", {"timeframe": "H4"})
+    assert data["method"] == "keyboard"
     assert "240" in page.typed
+
+
+# --- M7: viewport ------------------------------------------------------------
+
+def test_scroll_to_date_windows_by_resolution(tmp_path):
+    mcp, page = _build(tmp_path)
+    page.interval = "15"
+    data = _data(mcp, "tv_desktop_scroll_to_date", {"time": 1_700_000_000, "bars_each_side": 10})
+    assert data["resolution_minutes"] == 15
+    assert page.viewports[-1]["from"] == 1_700_000_000 - 10 * 15 * 60
+    assert page.viewports[-1]["to"] == 1_700_000_000 + 10 * 15 * 60
+    assert data["pages_loaded"] == 2 and data["clamped"] is False
+
+
+def test_set_visible_range_rejects_inverted(tmp_path):
+    mcp, _ = _build(tmp_path)
+    with pytest.raises(ToolError, match="after from_time"):
+        asyncio.run(mcp.call_tool("tv_desktop_set_visible_range",
+                                  {"from_time": 10, "to_time": 5}))
+
+
+def test_resolution_to_minutes():
+    from tvmcp.desktop.driver import resolution_to_minutes as r
+
+    assert r("15") == 15 and r("240") == 240
+    assert r("D") == 1440 and r("1D") == 1440 and r("W") == 10080 and r("1M") == 43200
+    assert r("30S") == 1 and r("") == 60
+
+
+# --- M7: study inputs ----------------------------------------------------------
+
+_MACD = {"id": "macd1", "title": "MACD", "plots": [], "rows": [],
+         "inputs": {"fast_length": 12, "slow_length": 26, "stuck": 9}}
+
+
+def test_set_study_inputs_reads_back(tmp_path):
+    page = FakePage(studies=[_MACD])
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_set_study_inputs",
+                 {"study": "macd", "inputs": {"fast_length": 3, "slow_length": 10}})
+    assert data["applied"] is True
+    assert data["before"] == {"fast_length": 12, "slow_length": 26}
+    assert data["after"] == {"fast_length": 3, "slow_length": 10}
+
+
+def test_set_study_inputs_reports_mismatch(tmp_path):
+    page = FakePage(studies=[_MACD])
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_set_study_inputs",
+                 {"study": "macd", "inputs": {"stuck": 16}})
+    assert data["applied"] is False and data["mismatched"] == ["stuck"]
+
+
+def test_set_study_inputs_unknown_lists_available(tmp_path):
+    page = FakePage(studies=[_MACD])
+    mcp, _ = _build(tmp_path, page)
+    with pytest.raises(ToolError, match="Unknown input.*fast_length"):
+        asyncio.run(mcp.call_tool("tv_desktop_set_study_inputs",
+                                  {"study": "macd", "inputs": {"nope": 1}}))
+
+
+def test_read_study_graphics_compact_flag(tmp_path):
+    page = FakePage(studies=[_LUX])
+    mcp, _ = _build(tmp_path, page)
+    _data(mcp, "tv_desktop_read_study_graphics", {"study": "lux1", "compact": True})
+    assert page.study_payloads[-1]["compact"] is True
+
+
+# --- M7: strategy tester ---------------------------------------------------------
+
+def test_read_strategy_metrics_and_orders(tmp_path):
+    page = FakePage()
+    page.strategy = {
+        "strategies": [{"id": "s1", "title": "SMA Cross", "visible": True}],
+        "selected": {"id": "s1", "title": "SMA Cross"}, "currency": "USD",
+        "metrics": {"net_profit": 120.5, "profit_factor": 1.4, "buy_hold_return": 300.0},
+        "sides": {}, "total_orders": 40,
+        "orders": [{"id": 1, "side": "buy", "price": 1.1, "time": 1_700_000_000}],
+    }
+    mcp, _ = _build(tmp_path, page)
+    data = _data(mcp, "tv_desktop_read_strategy", {"orders": 5})
+    assert data["metrics"]["buy_hold_return"] == 300.0
+    assert data["orders"][0]["side"] == "buy"
+    assert page.strategy_payloads[-1] == {"orders": 5, "open_panel": True, "wait_ms": 6000}
+
+
+def test_read_strategy_no_strategy_raises(tmp_path):
+    mcp, _ = _build(tmp_path)
+    with pytest.raises(ToolError, match="No strategy"):
+        asyncio.run(mcp.call_tool("tv_desktop_read_strategy"))
+
+
+def test_read_strategy_hidden_hint(tmp_path):
+    page = FakePage()
+    page.strategy = {"strategies": [{"id": "s1", "title": "SMA Cross", "visible": False}],
+                     "report": None}
+    mcp, _ = _build(tmp_path, page)
+    with pytest.raises(ToolError, match="Hidden strategies never compute.*SMA Cross"):
+        asyncio.run(mcp.call_tool("tv_desktop_read_strategy"))
+
+
+# --- M7: replay ------------------------------------------------------------------
+
+def test_replay_lifecycle(tmp_path):
+    mcp, page = _build(tmp_path)
+    st = _data(mcp, "tv_desktop_replay_status")
+    assert st["started"] is False
+    data = _data(mcp, "tv_desktop_replay_start", {"time": 1_700_000_000})
+    assert data["action"] == "started"
+    assert page.replay_calls[-1]["time_ms"] == 1_700_000_000_000  # seconds -> ms
+    data = _data(mcp, "tv_desktop_replay_step", {"count": 3})
+    assert data["stepped"] == 3 and data["current_date"] == 1_700_000_000_000 + 180000
+    data = _data(mcp, "tv_desktop_replay_trade", {"side": "buy"})
+    assert data["position"] == {"side": "buy"}
+    data = _data(mcp, "tv_desktop_replay_stop")
+    assert data["action"] == "stopped"
+
+
+def test_replay_step_before_start_raises(tmp_path):
+    mcp, _ = _build(tmp_path)
+    with pytest.raises(ToolError, match="not started"):
+        asyncio.run(mcp.call_tool("tv_desktop_replay_step"))
+
+
+def test_replay_start_no_data_raises(tmp_path):
+    mcp, page = _build(tmp_path)
+    with pytest.raises(ToolError, match="did not start"):
+        asyncio.run(mcp.call_tool("tv_desktop_replay_start", {"time": 1}))
+    assert page.replay_calls[-1]["time_ms"] == 1000
+
+
+def test_replay_trade_side_validated(tmp_path):
+    mcp, _ = _build(tmp_path)
+    with pytest.raises(Exception):
+        asyncio.run(mcp.call_tool("tv_desktop_replay_trade", {"side": "long"}))
+
+
+# --- M7: pine editor -------------------------------------------------------------
+
+def test_pine_set_compile_ok(tmp_path):
+    mcp, page = _build(tmp_path)
+    data = _data(mcp, "tv_desktop_pine_set_source", {"source": "//@version=6\nindicator('x')"})
+    assert data["applied"] is True and page.editor.startswith("//@version=6")
+    data = _data(mcp, "tv_desktop_pine_compile")
+    assert data["ok"] is True and data["clicked"] == "Add to chart"
+    assert data["study_added"] is True
+
+
+def test_pine_compile_reports_errors_and_ctrl_enter_fallback(tmp_path):
+    mcp, page = _build(tmp_path)
+    page.compile_button = None
+    page.markers = [{"line": 3, "column": 1, "severity": "error", "message": "Mismatched input"},
+                    {"line": 1, "column": 1, "severity": "warning", "message": "unused"}]
+    data = _data(mcp, "tv_desktop_pine_compile")
+    assert data["ok"] is False and data["errors"][0]["line"] == 3
+    assert len(data["warnings"]) == 1
+    assert data["clicked"] == "Ctrl+Enter"
+    assert page.pressed[-1] == "Enter"
+
+
+def test_pine_get_source_and_editor_missing(tmp_path):
+    mcp, page = _build(tmp_path)
+    page.editor = "x"
+    assert _data(mcp, "tv_desktop_pine_get_source")["source"] == "x"
+    page.editor = None
+    with pytest.raises(ToolError, match="Pine Editor is not reachable"):
+        asyncio.run(mcp.call_tool("tv_desktop_pine_get_source"))
+
+
+def test_pine_list_and_open_script(tmp_path):
+    mcp, page = _build(tmp_path)
+    data = _data(mcp, "tv_desktop_pine_list_scripts")
+    assert data["scripts"][0]["name"] == "My SMC"
+    data = _data(mcp, "tv_desktop_pine_open_script", {"name": "my smc"})
+    assert data["id"] == "abc" and page.editor.startswith("//@version")
+    with pytest.raises(ToolError, match="No saved script matches"):
+        asyncio.run(mcp.call_tool("tv_desktop_pine_open_script", {"name": "zzz"}))
+
+
+def test_pine_save_ctrl_s(tmp_path):
+    mcp, page = _build(tmp_path)
+    data = _data(mcp, "tv_desktop_pine_save")
+    assert data["via"] == "Ctrl+S" and page.pressed[-1] == "s"
 
 
 def test_list_drawings_returns_viewport_and_shapes(tmp_path):
@@ -354,7 +688,7 @@ def test_read_study_graphics_passes_limit_and_kinds(tmp_path):
     assert data["counts"]["boxes"] == 1
     assert data["boxes"][0]["price1"] == 1.16556
     assert page.study_payloads[-1] == {
-        "query": "lux1", "limit": 10, "kinds": ["boxes"]}
+        "query": "lux1", "limit": 10, "kinds": ["boxes"], "compact": False}
 
 
 def test_study_query_miss_raises_with_candidates(tmp_path):
