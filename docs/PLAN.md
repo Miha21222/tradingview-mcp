@@ -39,7 +39,9 @@ Owner decisions: unofficial TV access acceptable (personal use) · chart route =
 | `strategy` | M5 | user plugin dirs (`strategies/`, `indicators/`) via FastMCP Provider; default surface = `tv_strategy_list` + `tv_strategy_run(name, params)` dispatcher only | no |
 | `webhook` | later | local receiver for TV alert webhooks (`{{plot()}}`/`{{strategy.*}}` placeholders — the only sanctioned push channel out of TV) | Essential+ & 2FA |
 
-Env config: `TV_TOOLSETS` (comma list; `default`, `all` special), `TV_TOOLS` (additive singles), `TV_READ_ONLY=1` (hard-wins), `TV_CACHE_DIR`, `TV_MAX_BARS` (default 5000), `OANDA_API_KEY`, `OANDA_ENV=practice|live`, later `TV_SESSIONID`, `TV_CDP_URL`, `TV_STRATEGY_DIR`, `TV_ALLOW_CODE_EXEC`.
+Hybrid with the official TradingView MCP (2026-09-19): `TV_TOOLSETS=hybrid` = `data,scan,chart,backtest,pine,journal,strategy` — the surface `mcp.tradingview.com` lacks; `public` is dropped (official screener/quotes/search replace it), `tv_setup_doctor` registers unconditionally. Plugin manifest and `.mcp.json` register the official server (`mcp-tradingview`, HTTP, OAuth) side by side; routing lives in the `tradingview-hybrid` skill.
+
+Env config: `TV_TOOLSETS` (comma list; `default`, `all`, `hybrid` special), `TV_TOOLS` (additive singles), `TV_READ_ONLY=1` (hard-wins), `TV_CACHE_DIR`, `TV_MAX_BARS` (default 5000), `OANDA_API_KEY`, `OANDA_ENV=practice|live`, later `TV_SESSIONID`, `TV_CDP_URL`, `TV_STRATEGY_DIR`, `TV_ALLOW_CODE_EXEC`.
 
 ### Key library choices (with reasons)
 
@@ -112,6 +114,12 @@ Claude Code plugin in own marketplace repo (bundles server + skills + hooks + `u
   - [x] Plugin packaging: plugin.json userConfig (TV_SESSIONID/OANDA_API_KEY sensitive, no defaults; operator settings TV_TOOLSETS/TV_READ_ONLY/TV_MAX_BARS/OANDA_ENV/TV_CHART_DIR/TV_JOURNAL_DIR/TV_STRATEGY_DIR/TV_CDP_URL), inline mcpServers bridging userConfig→env, marketplace.json; `claude plugin validate .` passes; packaged skills carry no private UUIDs/paths (contract-tested)
   - [x] Setup self-diagnosis (2026-08-26): `tv_setup_doctor` in the default `public` surface — checks node/npx, Playwright Chromium, OANDA key, TV_SESSIONID, desktop CDP (verifies the listener actually has a tradingview.com tab — any CDP app can own the port; when the port is dead but a TradingView.exe process exists, the check says the app runs WITHOUT the debug flag and the fix is Stop-Process + flagged relaunch with an ask-the-user-first note — the app is single-instance, a plain relaunch only focuses the flagless copy; launcher path in the fix is absolute), journal/strategy dirs; every broken check carries the exact `fix` shell command so an agent self-heals. Server never auto-installs; credential fixes are marked manual by policy. Failure paths (Dukascopy missing npx, chart missing Chromium) raise actionable errors pointing at the fix + the doctor
   - [ ] Optional (deferred): webhook receiver, MCP Apps, M5 `strategy` sandboxed Python escape hatch
+- [x] **M6 — hybrid with the official TradingView MCP** (2026-09-19)
+  - [x] Official server (`https://mcp.tradingview.com/mcp`, public beta 2026-09-16, OAuth 2.1 + PKCE, Essential+ plan, ~100 req/min, ~40 tools) probed live: OHLCV 1m…1M ≤5000 bars incl. futures + broker CFDs, economic/earnings/dividend calendars, news, fundamentals, price alerts, watchlists. **Verified limits:** bars delayed 15+ min; no `end_time`/paging (1m history ≈ 3.6 ES sessions); screener/symbol_data/search do not know broker CFDs (`PEPPERSTONE:US500` → "no data") while `get_ohlcv` serves them; `technicals_rating` all-null on ES1!; alerts price-only, `alerts_log` empty despite fired alerts; nothing for charts/Pine/drawings/replay/backtests/desktop
+  - [x] `hybrid` toolset alias (`config.py`): drops `public`, keeps session/desktop opt-in; `tv_setup_doctor` moved out of the `public` gate (core, always registered)
+  - [x] Distribution: `plugin.json` + `.mcp.json` register `mcp-tradingview` (type http) next to `tradingview`; plugin `TV_TOOLSETS` default = `hybrid`; contract tests for both
+  - [x] `tradingview-hybrid` skill: per-job routing table, official beta capabilities/limits, pair setup, "do I need both" answer; `tvmcp-guide` / `market-screening` / README cross-link it
+  - Deferred by design: server-level bridging (official as a DataProvider) — would need the OAuth token from Claude Code's credential store; no data win over Dukascopy/session anyway
 
 ## Verification per milestone
 

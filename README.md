@@ -15,7 +15,20 @@ M0-M5 complete: server boots with `public`/`data` defaults; opt-in toolsets for 
 /plugin install tradingview-mcp@tradingview-mcp-marketplace
 ```
 
-The install prompts for optional credentials (OANDA practice key, TradingView `sessionid`) and operator settings (`TV_TOOLSETS`, `TV_READ_ONLY`, ...) — nothing is required for the default `public,data` surface, which works with zero TradingView account. Requires [uv](https://docs.astral.sh/uv/) on PATH.
+The install registers **two** servers: this one (`tradingview`, stdio) and the official TradingView MCP (`mcp-tradingview`, `https://mcp.tradingview.com/mcp`). It prompts for optional credentials (OANDA practice key, TradingView `sessionid`) and operator settings (`TV_TOOLSETS`, `TV_READ_ONLY`, ...). Plugin default is `TV_TOOLSETS=hybrid`; set it to `default` (= `public,data`) for a zero-account setup that does not need the official server. Requires [uv](https://docs.astral.sh/uv/) on PATH.
+
+## Hybrid with the official TradingView MCP
+
+TradingView ships an official MCP (public beta, needs an Essential+ plan, OAuth via `/mcp`). It covers quotes, screener, symbol search, news, economic/earnings/dividend calendars, fundamentals, filings, price alerts and watchlists — and nothing else: no charts, indicators, Pine, drawings, replay, backtests or desktop access; bars delayed 15+ minutes; no history paging beyond the last 5000 bars; no broker-CFD symbols in its screener.
+
+This project is built to run **next to it**, not instead of it:
+
+| Job | Server |
+|---|---|
+| quotes, screener, search, news, calendars, fundamentals, alerts, watchlists | official `mcp-tradingview` |
+| deep/free OHLCV history, realtime session feed, SMC/ICT scans, chart rendering, backtests, strategies, Pine compile, journal, TradingView Desktop (CDP) | this server, `TV_TOOLSETS=hybrid` (+ `session`, `desktop` as opt-ins) |
+
+`hybrid` = `data,scan,chart,backtest,pine,journal,strategy`: it drops the `public` toolset (the official screener replaces it) and keeps `tv_setup_doctor`, which now registers regardless of toolsets. The `tradingview-hybrid` skill holds the per-job routing table and the official beta's verified limits. Users without a qualifying TradingView plan keep `TV_TOOLSETS=default,...` and ignore the official entry — the two servers are independent.
 
 ## Quick start
 
@@ -29,13 +42,13 @@ uv run tv tv_data_get_bars '{"symbol":"EURUSD","count":10}'   # CLI: call any to
 
 The opt-in `chart` toolset renders via headless Chromium; run `uv run playwright install chromium` once if you enable it. Enable opt-in toolsets via `TV_TOOLSETS=default,scan,chart,backtest,journal`.
 
-Claude Code: the repo's `.mcp.json` registers the server automatically when you trust the project.
+Claude Code: the repo's `.mcp.json` registers both servers automatically when you trust the project (`tradingview` with `TV_TOOLSETS=hybrid`, plus the official `mcp-tradingview`).
 
 ## Configuration (env vars)
 
 | Var | Default | Meaning |
 |---|---|---|
-| `TV_TOOLSETS` | `default` (= `public,data`) | Comma list; `all` enables everything. Opt-ins: `scan` (SMC scanning), `chart` (PNG rendering), `backtest`, `journal`, `pine` (compile/typecheck), `strategy` (declarative YAML specs), `session` (TV-account data, ToS risk), `desktop` (CDP to TradingView Desktop, ToS risk) |
+| `TV_TOOLSETS` | `default` (= `public,data`) | Comma list; `all` enables everything; `hybrid` = `data,scan,chart,backtest,pine,journal,strategy` (pairs with the official TradingView MCP, see above). Opt-ins: `scan` (SMC scanning), `chart` (PNG rendering), `backtest`, `journal`, `pine` (compile/typecheck), `strategy` (declarative YAML specs), `session` (TV-account data, ToS risk), `desktop` (CDP to TradingView Desktop, ToS risk) |
 | `TV_READ_ONLY` | off | `1` = write-capable tools never register (wins over everything) |
 | `TV_CACHE_DIR` | `~/.tvmcp/cache` | Parquet OHLCV cache |
 | `TV_CHART_DIR` | `~/.tvmcp/charts` | Rendered PNG output (managed, collision-safe filenames) |

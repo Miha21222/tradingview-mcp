@@ -120,6 +120,23 @@ def test_config_parsing(monkeypatch):
     s2 = load_settings({})
     assert s2.toolsets == frozenset({"public", "data"})
 
+    s3 = load_settings({"TV_TOOLSETS": "hybrid"})
+    assert "public" not in s3.toolsets
+    assert "session" not in s3.toolsets and "desktop" not in s3.toolsets
+    assert {"data", "scan", "chart", "backtest", "pine", "journal", "strategy"} <= s3.toolsets
+
+    s4 = load_settings({"TV_TOOLSETS": "hybrid,session,desktop"})
+    assert {"session", "desktop"} <= s4.toolsets and "public" not in s4.toolsets
+
+
+def test_doctor_registers_without_public_toolset(tmp_path):
+    # hybrid installs drop `public` (the official TradingView MCP covers it)
+    # but must keep self-diagnosis
+    mcp = build_server(_settings({"data"}, tmp_path))
+    names = _tool_names(mcp)
+    assert "tv_setup_doctor" in names
+    assert "tv_screener_run" not in names
+
 
 
 

@@ -17,3 +17,4 @@ reference must exist in the registered tool surface (`tests/test_skills.py`).
 | `journal-sync` | `tv_journal_scan`, `tv_journal_parse` + Notion MCP | FX Replay→Notion mapping (vault note 06) |
 | `tvmcp-guide` | all (orientation) | full toolset map, setup ladder, output conventions, symptom→fix troubleshooting table |
 | `tradingview-tiers` | `tv_session_*`, `tv_desktop_*` | opt-in account tiers: setup, ToS framing, cookie/CDP failure recovery |
+| `tradingview-hybrid` | routing (this server vs the official TradingView MCP) | which server answers which job, official beta limits (delay, no paging, CFD gaps, price-only alerts), pair setup |

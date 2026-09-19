@@ -2,7 +2,7 @@
   "name": "tradingview-mcp",
   "displayName": "TradingView MCP",
   "version": "0.1.0",
-  "description": "TradingView toolkit for AI agents: screener, FX data, SMC/ICT scanning, chart rendering, backtesting, journal sync, Pine compile. Not affiliated with TradingView, Inc.",
+  "description": "TradingView toolkit for AI agents: SMC/ICT scanning, chart rendering, backtesting, journal sync, Pine compile, TradingView Desktop control - plus the official TradingView MCP (quotes, screener, news, calendars, alerts, watchlists) registered side by side. Not affiliated with TradingView, Inc.",
   "license": "MIT",
   "author": {
     "name": "tvmcp"
@@ -23,7 +23,8 @@
     "TV_TOOLSETS": {
       "type": "string",
       "title": "Enabled toolsets",
-      "description": "Comma list. Default = public,data. Add scan,chart,backtest,journal,strategy as needed; session/desktop/pine are opt-in and carry ToS risk."
+      "description": "Comma list. Default `hybrid` = data,scan,chart,backtest,pine,journal,strategy (everything the official TradingView MCP does not do). `default` = public,data (unauth screener, no official server needed); `all` = everything. session/desktop are opt-in and carry ToS risk: `hybrid,session,desktop`.",
+      "default": "hybrid"
     },
     "TV_READ_ONLY": {
       "type": "string",
@@ -64,7 +65,14 @@
   "mcpServers": {
     "tradingview": {
       "command": "uv",
-      "args": ["run", "--project", "${CLAUDE_PLUGIN_ROOT}", "python", "-m", "tvmcp"],
+      "args": [
+        "run",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT}",
+        "python",
+        "-m",
+        "tvmcp"
+      ],
       "env": {
         "OANDA_API_KEY": "${OANDA_API_KEY}",
         "TV_SESSIONID": "${TV_SESSIONID}",
@@ -77,6 +85,10 @@
         "TV_STRATEGY_DIR": "${TV_STRATEGY_DIR}",
         "TV_CDP_URL": "${TV_CDP_URL}"
       }
+    },
+    "mcp-tradingview": {
+      "type": "http",
+      "url": "https://mcp.tradingview.com/mcp"
     }
   }
 }

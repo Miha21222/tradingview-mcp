@@ -10,6 +10,11 @@ account involved, no scraping (pure JSON POST to the public scanner endpoint).
 
 ## When to use
 
+If the official TradingView MCP (`mcp-tradingview`) is registered and authenticated,
+prefer its screener/quote/search tools for these jobs — the `public` toolset here
+is the zero-account fallback (`TV_TOOLSETS=hybrid` does not load it). Routing: the
+`tradingview-hybrid` skill.
+
 - Ranking a market by an indicator or fundamental (RSI, ADX, ATR, change, volume).
 - Filtering for conditions: oversold/overbought, high momentum, liquidity.
 - Finding the canonical ticker for a fuzzy symbol ("gold", "btc", "eurusd").

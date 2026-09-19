@@ -1,6 +1,6 @@
 """Contract tests for the companion skills bundle.
 
-Validates: expected 8 skills exist, each SKILL.md has spec-clean frontmatter
+Validates: expected skills exist, each SKILL.md has spec-clean frontmatter
 (name + description, name matches folder), stays <= 500 lines, and every `tv_*`
 tool it references is a real registered tool (drives tool-ref drift to fail CI).
 """
@@ -17,7 +17,7 @@ SKILLS = Path(__file__).parent.parent / "skills"
 EXPECTED = {
     "smc-scanning", "chart-markup", "strategy-backtesting", "pine-authoring",
     "risk-sizing", "market-screening", "strategy-review", "journal-sync",
-    "tvmcp-guide", "tradingview-tiers",
+    "tvmcp-guide", "tradingview-tiers", "tradingview-hybrid",
 }
 MAX_LINES = 500
 

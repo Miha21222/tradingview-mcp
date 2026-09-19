@@ -22,7 +22,8 @@ always.
 
 | Toolset | Tools | Needs | TV ToS risk |
 |---|---|---|---|
-| `public` (default) | `tv_screener_run`, `tv_ta_summary`, `tv_symbol_search`, `tv_setup_doctor` | nothing | none (no account) |
+| core (always) | `tv_setup_doctor` | nothing | none |
+| `public` (default) | `tv_screener_run`, `tv_ta_summary`, `tv_symbol_search` | nothing | none (no account) |
 | `data` (default) | `tv_data_get_bars`, `tv_data_providers_status` | Node for Dukascopy; OANDA key optional | none (not TV data) |
 | `scan` | `tv_scan_fvg/ob/structure/liquidity/sessions/prev_hl` | bars available | none |
 | `chart` | `tv_chart_render` | `playwright install chromium` | none (own engine) |
@@ -33,9 +34,13 @@ always.
 | `session` | `tv_session_status/ohlcv/realtime` | `TV_SESSIONID` cookie | **yes — user's account** |
 | `desktop` | `tv_desktop_status/screenshot/set_symbol/set_timeframe` | app running with CDP | **yes — user's account** |
 
-Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything).
+Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything;
+`hybrid` = data+scan+chart+backtest+pine+journal+strategy — the surface the official
+TradingView MCP does not cover, used when both servers run side by side).
 `TV_READ_ONLY=1` strips every workspace-mutating tool regardless of toolsets.
-For `session`/`desktop` details, load the `tradingview-tiers` skill.
+For `session`/`desktop` details, load the `tradingview-tiers` skill; for the
+two-server split (quotes/news/calendar/alerts/watchlists on the official server),
+load `tradingview-hybrid`.
 
 ## Output conventions (hold these in every answer)
 
@@ -51,7 +56,8 @@ For `session`/`desktop` details, load the `tradingview-tiers` skill.
 
 ## Choosing the right tool
 
-- "What's the market doing / find candidates" → `tv_screener_run` / `tv_ta_summary`.
+- "What's the market doing / find candidates" → `tv_screener_run` / `tv_ta_summary`
+  (or the official TradingView MCP's screener when it is registered — see `tradingview-hybrid`).
 - "Get me price history" → `tv_data_get_bars` (free feeds). TV-chart-parity candles
   specifically → `tv_session_ohlcv` (opt-in, cookie).
 - "Find setups / structure / liquidity" → the scan tools (`tv_scan_fvg`, `tv_scan_ob`, `tv_scan_structure`, `tv_scan_liquidity`, `tv_scan_sessions`, `tv_scan_prev_hl`), then `tv_chart_render` to show it.

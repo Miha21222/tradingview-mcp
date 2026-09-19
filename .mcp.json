@@ -2,7 +2,21 @@
   "mcpServers": {
     "tradingview": {
       "command": "uv",
-      "args": ["run", "--project", "${CLAUDE_PLUGIN_ROOT:-${CLAUDE_PROJECT_DIR:-.}}", "python", "-m", "tvmcp"]
+      "args": [
+        "run",
+        "--project",
+        "${CLAUDE_PLUGIN_ROOT:-${CLAUDE_PROJECT_DIR:-.}}",
+        "python",
+        "-m",
+        "tvmcp"
+      ],
+      "env": {
+        "TV_TOOLSETS": "hybrid"
+      }
+    },
+    "mcp-tradingview": {
+      "type": "http",
+      "url": "https://mcp.tradingview.com/mcp"
     }
   }
 }

@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_TOOLSETS = frozenset({"public", "data"})
+# `hybrid`: everything the official TradingView MCP (mcp.tradingview.com) does
+# NOT cover. Drops `public` (quotes/screener/TA - the official server does it
+# better) and keeps the opt-in `session`/`desktop` tiers off (ToS-risk tiers
+# stay an explicit choice: `TV_TOOLSETS=hybrid,session,desktop`).
+HYBRID_TOOLSETS = frozenset(
+    {"data", "scan", "chart", "backtest", "pine", "journal", "strategy"}
+)
 ALL_TOOLSETS = frozenset(
     {
         "public",
@@ -52,6 +59,8 @@ def _parse_toolsets(raw: str) -> frozenset[str]:
             result |= DEFAULT_TOOLSETS
         elif p == "all":
             result |= ALL_TOOLSETS
+        elif p == "hybrid":
+            result |= HYBRID_TOOLSETS
         elif p in ALL_TOOLSETS:
             result.add(p)
         # unknown names are ignored silently: forward-compat with future toolsets

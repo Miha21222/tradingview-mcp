@@ -35,6 +35,23 @@ def test_mcp_server_env_bridges_user_config():
     assert env.get("TV_SESSIONID") == "${TV_SESSIONID}"
 
 
+def test_official_tradingview_mcp_registered_side_by_side():
+    # hybrid distribution: one plugin install brings both servers
+    servers = _load(".claude-plugin/plugin.json")["mcpServers"]
+    off = servers["mcp-tradingview"]
+    assert off["type"] == "http"
+    assert off["url"] == "https://mcp.tradingview.com/mcp"
+    assert "env" not in off and "command" not in off  # OAuth, nothing to bridge
+    dev = _load(".mcp.json")["mcpServers"]
+    assert dev["mcp-tradingview"]["url"] == off["url"]
+
+
+def test_toolsets_default_to_hybrid_in_plugin():
+    uc = _load(".claude-plugin/plugin.json")["userConfig"]
+    assert uc["TV_TOOLSETS"]["default"] == "hybrid"
+    assert _load(".mcp.json")["mcpServers"]["tradingview"]["env"]["TV_TOOLSETS"] == "hybrid"
+
+
 def test_marketplace_references_plugin():
     m = _load(".claude-plugin/marketplace.json")
     assert m["name"] == "tradingview-mcp-marketplace"

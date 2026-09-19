@@ -1,6 +1,7 @@
 """tvmcp server assembly: builds the FastMCP app with toolset-gated registration.
 
-Toolsets register only when enabled via TV_TOOLSETS (default: public,data) - the
+Toolsets register only when enabled via TV_TOOLSETS (default: public,data;
+`hybrid` = everything the official TradingView MCP lacks) - the
 gate is registration itself, so disabled toolsets cost zero context. See
 docs/PLAN.md for the toolset matrix and CLAUDE.md for the hard rules.
 """
@@ -29,12 +30,15 @@ def build_server(settings: Settings | None = None) -> FastMCP:
     settings = settings or load_settings()
     mcp = FastMCP(name=SERVER_NAME, instructions=_INSTRUCTIONS)
 
+    # tv_setup_doctor is core: it registers regardless of toolsets so a
+    # `hybrid` install (no `public`) can still self-diagnose.
+    from . import doctor
+
+    doctor.register(mcp, settings)
     if settings.toolset_enabled("public"):
-        from . import doctor
         from .toolsets import screener
 
         screener.register(mcp, settings)
-        doctor.register(mcp, settings)
     if settings.toolset_enabled("data"):
         from .toolsets import data
 
