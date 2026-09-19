@@ -56,6 +56,31 @@ instead of now. Use it to zoom any past moment - a backtest trade, a journal ent
 with `count` sized to the context you want (e.g. entry minus 60 bars). The result's
 `end_time` echoes the actual last bar.
 
+## Before you mark anything up (rendered PNG or the user's live chart)
+
+Habits from the setups where AI markup actually earned trust:
+
+- **Ask before starting** when the request is open ("mark the levels", "show
+  structure"): which timeframe, how many levels at most, which concept exactly
+  (demand/supply zones ≠ support/resistance ≠ FVG). One short question set, then
+  do it — don't guess the school.
+- **Name the concept precisely** in the output: each drawn object says what it is
+  by the user's vocabulary and the detector/feed it came from.
+- **Use the visible candles.** Levels come from the bars in the window you
+  render or the user is looking at (`tv_desktop_list_drawings` returns the
+  viewport); no levels "from 2020" unless asked.
+- **Cap and justify.** At most ~5 levels/zones per chart, each with one line of
+  reasoning (touches, reaction, swept or not). More is noise the user will delete.
+- **"Text first, chart later"** when the user wants to review: describe the
+  planned markup as a list, draw only after the OK. On the live chart this is
+  mandatory for anything beyond a single level.
+- **Respect the user's own drawings.** On the live chart list existing shapes
+  first, analyze *within* their markup when they have one, never redraw or
+  remove what you did not create.
+- **Verify after drawing.** Re-list drawings (or screenshot) and compare with
+  what you intended — TradingView's own copilot was caught reporting "done" on
+  changes it never made. Report only what you confirmed.
+
 ## Workflow
 
 1. Decide the window: `tv_chart_render(symbol, timeframe, count, markup_json, end_time?)`.

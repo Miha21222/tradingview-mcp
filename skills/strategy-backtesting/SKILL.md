@@ -55,6 +55,42 @@ only** — never run user/LLM Python code (blocked by the hard rules).
 6. **R**: each trade's `r` = `pnl / (size * |entry - sl|)`; a stop-hit is ~`-1.0R`.
    Judge a strategy by expectancy in R, not by total P&L (account size is arbitrary).
 
+## Benchmark and sanity gates (apply to every result you report)
+
+Habits distilled from the honest minority of public "AI trading" setups — the
+ones that showed their strategy losing. Run them before calling anything good:
+
+1. **Buy-and-hold first.** Every result is quoted next to the same period's
+   buy-and-hold return (and its drawdown). Compute it from the bars you tested;
+   on the user's TradingView chart `tv_desktop_read_strategy` returns it as
+   `buy_hold_return`. A strategy below buy-and-hold is not "profitable", whatever
+   the net profit says.
+2. **Two runs: frictionless and realistic.** Once with `spread_pips=0` /
+   zero commission, once with the user's real spread + commission. Report both;
+   the gap is the strategy's cost sensitivity. If the realistic run flips the
+   sign, say that first.
+3. **Start-date sensitivity.** Rerun with the window shifted by ~10% of its
+   length (e.g. start 50 bars later). A verdict that flips with the start date
+   is noise, not edge — report the range, not one number.
+4. **Trade-count gate.** Compare trades per month with what the rules should
+   produce (a "15-minute reversal" firing 570 times in 10 months is a bug, not a
+   discovery). Fewer than ~30 trades in total: no conclusion, say so.
+5. **Cross-asset / cross-timeframe scorecard.** When the user wants robustness,
+   tabulate the same rules over 3–7 symbols or timeframes with win rate, profit
+   factor, expectancy in R, trades, buy-and-hold — and one line of *why* the weak
+   cells fail. Include the buy-and-hold row as a benchmark row, not a footnote.
+6. **Improve-only-if-better, and abort dead ends.** In an optimization loop
+   keep a variant only when the realistic-run expectancy improves on ALL
+   scorecard assets, not one; after two rounds with no improvement, stop and
+   say the idea is exhausted instead of tuning it into an in-sample fit.
+7. **Forward-test before capital.** A surviving strategy goes into a dated
+   "incubation" note: rerun it on new bars weekly and compare with the
+   backtest stats. Divergence within a month = overfit; say so.
+
+Quote returns as expectancy in R and profit factor; never headline a total P&L
+percentage (in-sample single-asset numbers like "3600%" are the standard sign of
+an overfit loop).
+
 ## Workflow
 
 1. Fetch bars: `tv_data_get_bars(symbol, timeframe, count)` (or let the tool).
