@@ -147,8 +147,9 @@ _TEXT_SNIPPET = """
     const q = model.getPositionAt(o); return {line: q.lineNumber, column: q.column};
   });
   const savedState = () => {
-    const saveBtn = document.querySelector('[class*="saveButton"]');
-    return !!(saveBtn && /saved/i.test(saveBtn.className));
+    const saveBtn = document.querySelector('[data-qa-id="pine-script-save-button"]')
+      || document.querySelector('[class*="saveButton"]');
+    return !!(saveBtn && /(^|[^a-z])saved[^a-z]/i.test(' ' + saveBtn.className + ' '));
   };
 """
 
@@ -172,8 +173,9 @@ _SET_JS = """
   // A saved script open in the editor is auto-saved to the user's account as a
   // NEW VERSION when its text changes (verified 2026-09-19: one setValue
   // bumped the owner's script to v2). Refuse unless the caller opted in.
-  const saveBtn = document.querySelector('[class*="saveButton"]');
-  const savedOpen = !!(saveBtn && /saved/i.test(saveBtn.className));
+  const saveBtn = document.querySelector('[data-qa-id="pine-script-save-button"]')
+    || document.querySelector('[class*="saveButton"]');
+  const savedOpen = !!(saveBtn && /(^|[^a-z])saved[^a-z]/i.test(' ' + saveBtn.className + ' '));
   if (savedOpen && !p.overwrite_saved) return {saved_script_open: true};
   m.editor.setValue(p.source);
   const now = m.editor.getValue();
@@ -275,22 +277,20 @@ _HEADER_JS = """
 (() => {
   const m = __FIND__;
   const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
-  // The editor panel = nearest ancestor of the Monaco node that also holds the
-  // save button; fall back to the whole document.
-  const panel = (() => {
-    let el = document.querySelector('.monaco-editor.pine-editor-monaco');
-    for (let i = 0; el && i < 12; i++) {
-      if (el.querySelector && el.querySelector('[class*="saveButton"], [data-name="save-script"]')) return el;
-      el = el.parentElement;
-    }
-    return document;
-  })();
-  const nameEl = panel.querySelector('[data-name="script-title"], [data-name="script-name"], '
-    + '[class*="scriptTitle"], [class*="scriptName"], [class*="titleText"], [class*="title"]');
-  const saveBtn = panel.querySelector('[class*="saveButton"]') || document.querySelector('[class*="saveButton"]');
-  const saved = !!(saveBtn && /saved/i.test(saveBtn.className));
+  // The title and the save button carry stable data-qa-ids (verified live on TV
+  // Desktop 3.4.1, RU locale); class hashes and data-names change between builds,
+  // so they are only fallbacks. Searching the document is safe: the Pine header
+  // exists once, and the editor may be a floating dialog that shares no ancestor
+  // with the chart pane.
+  const nameEl = document.querySelector('[data-qa-id="pine-script-title-button"]')
+    || document.querySelector('[class*="nameButton"]')
+    || document.querySelector('[data-name="script-title"], [data-name="script-name"], '
+      + '[class*="scriptTitle"], [class*="scriptName"]');
+  const saveBtn = document.querySelector('[data-qa-id="pine-script-save-button"]')
+    || document.querySelector('[class*="saveButton"], [data-name="save-script"]');
+  const saved = !!(saveBtn && /(^|[^a-z])saved[^a-z]/i.test(' ' + saveBtn.className + ' '));
   let src = '';
-  try { src = m ? m.editor.getValue().slice(0, 600) : ''; } catch (e) {}
+  try { src = m ? m.editor.getValue().slice(0, 4000) : ''; } catch (e) {}
   const dm = src.match(/\\b(?:strategy|indicator|library)\\s*\\(\\s*(?:title\\s*=\\s*)?(["'])((?:\\\\.|(?!\\1).)*)\\1/);
   return {no_editor: !m,
           script_name: nameEl ? (clean(nameEl.textContent).slice(0, 120) || null) : null,
