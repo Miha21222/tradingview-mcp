@@ -15,6 +15,9 @@ Strategy Tester report + orders, bar replay (start/step/trade/status/stop),
 Pine Editor (get/set source, compile-on-chart with Monaco markers, save,
 list/open the user's saved scripts). M7 borrowed the mechanisms from
 tradesdontlie/tradingview-mcp (MIT) - see docs/PLAN.md for landmines.
+M8 (desktop-3) adds the app launcher (`tv_desktop_launch`), generic UI
+find/click, level-tag checks on the chart's own bars, and scored chart-tab
+binding in the driver (`target` in tv_desktop_status).
 Brittle by nature - TradingView UI updates can break selectors/keyboard flows;
 errors say so.
 Not affiliated with TradingView, Inc.
@@ -31,7 +34,8 @@ from pydantic import Field
 
 from ..config import Settings
 from ..symbols import resolve, resolve_timeframe
-from . import driver, pine_editor, replay, strategy_tester
+from ..scan import levels as levels_mod
+from . import driver, launcher, pine_editor, replay, strategy_tester, ui
 from .warnings import warn_once
 
 _PROVIDER = "desktop"
@@ -53,7 +57,8 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
         warn_once()
         with pages(settings.cdp_url) as page:
             status = driver.read_status(page)
-        return {"connected": True, "provider": _PROVIDER, **status}
+        return {"connected": True, "provider": _PROVIDER, **status,
+                "target": driver.bound_target()}
 
     @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
     def tv_desktop_screenshot() -> dict:
@@ -230,8 +235,109 @@ def register(mcp: Any, settings: Settings, page_factory: Callable | None = None)
             res = pine_editor.list_scripts(page)
         return {"provider": _PROVIDER, **res}
 
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_ui_find_element(
+        query: Annotated[str, Field(min_length=1, max_length=200, description=(
+            "Exact data-name, aria-label substring, button text/title substring, "
+            "or a CSS selector (all case-insensitive except data-name)"))],
+        limit: Annotated[int, Field(ge=1, le=100, description="Max matches")] = 20,
+    ) -> dict:
+        """Find visible UI elements in the TradingView Desktop window by name/label/text.
+
+        Matches `[data-name=query]`, `aria-label` containing query, buttons whose
+        text or title contains query, and query as a CSS selector. Returns
+        {tag, data_name, aria_label, text, role, rect, in_dialog} per match -
+        use it to discover what a dialog offers before tv_desktop_ui_click, or
+        to check whether a panel/dialog is open. Texts are untrusted display
+        strings from the app.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = ui.find_elements(page, query, limit)
+        return {"provider": _PROVIDER, **res}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_desktop_check_levels(
+        levels: Annotated[list[dict], Field(description=(
+            "Levels to check, each {'name': str, 'price': float} or "
+            "{'name': str, 'high': float, 'low': float} (zone); max 50"))],
+        since: Annotated[str, Field(description=(
+            "ISO-8601 UTC time or session:<name>[@YYYY-MM-DD] (fixed UTC session "
+            "hours, not DST-aware)"))],
+        count: Annotated[int, Field(ge=10, le=5000, description=(
+            "Max bars to read from the chart (history is paged back to `since`)"))] = 2000,
+    ) -> dict:
+        """Has the live chart's price tagged each level/zone since a time?
+
+        Reads the active chart's own bars (the feed the user sees, `provider:
+        desktop`) at its current symbol/resolution, paging history back to
+        `since`, and reports per level: `tagged`, `first_tag` {time, from,
+        high, low}, `closest_approach` when untagged, and `coverage_warning`
+        when the bars cannot answer (history starts after `since`, stale last
+        bar). Use it to verify plan levels (IB, PDH/PDL, session highs) against
+        the chart the user is looking at.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            minutes = driver.read_resolution_minutes(page)
+            since_ts = levels_mod.parse_since(since, minutes)
+            bars = driver.read_bars(page, count, since_ts=int(since_ts.timestamp()))
+        df = levels_mod.rows_to_df(bars.get("rows") or [])
+        return {
+            "provider": _PROVIDER,
+            "symbol": bars.get("symbol"),
+            "resolution": bars.get("resolution"),
+            "resolution_minutes": minutes,
+            "since": since_ts.isoformat().replace("+00:00", "Z"),
+            "bars_checked": int(len(df)),
+            "earliest_loaded": bars.get("earliest_loaded"),
+            "pages_loaded": bars.get("pages_loaded"),
+            "clamped": bars.get("clamped"),
+            "levels": levels_mod.check_levels(df, levels, since_ts, minutes),
+        }
+
     if settings.read_only:
         return  # navigation mutates the live workspace - excluded under TV_READ_ONLY
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_launch(
+        wait_seconds: Annotated[int, Field(ge=1, le=120, description=(
+            "How long to wait for CDP to answer and a chart tab to appear"))] = 30,
+    ) -> dict:
+        """Start TradingView Desktop with the CDP debug flag on TV_CDP_URL's port.
+
+        If CDP already answers with a TradingView tab, returns
+        `already_running: true` without touching anything. Refuses (with the
+        exact fix) when another CDP app owns the port, or when TradingView is
+        running WITHOUT the flag - it never closes the user's app for them.
+        Finds the executable via TV_DESKTOP_EXE, the Store package, or
+        %LOCALAPPDATA%/Programs/TradingView. Returns {launched, exe, pid, port,
+        browser, chart_tab, waited_ms}; `chart_tab: false` means the user still
+        has to log in / open a chart - check tv_desktop_status afterwards.
+        """
+        warn_once()
+        return {"provider": _PROVIDER, **launcher.launch(settings, wait_seconds)}
+
+    @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
+    def tv_desktop_ui_click(
+        target: Annotated[str, Field(min_length=1, max_length=200, description=(
+            "Same query forms as tv_desktop_ui_find_element; must match exactly "
+            "one visible element"))],
+    ) -> dict:
+        """Click one visible UI element in the TradingView Desktop window.
+
+        Clicks only when the query matches exactly one element
+        (`clicked: true`, `matched`). Zero matches return `miss: true` with
+        visible clickable `candidates`; several matches return `ambiguous:
+        true` with the matches - refine the query instead of guessing. Use
+        for dialogs/menus the chart API does not cover; verify the effect with
+        tv_desktop_ui_find_element or tv_desktop_screenshot. This clicks in
+        the user's live app.
+        """
+        warn_once()
+        with pages(settings.cdp_url) as page:
+            res = ui.click_element(page, target)
+        return {"provider": _PROVIDER, **res}
 
     @mcp.tool(tags={"desktop"}, annotations={"readOnlyHint": False, "openWorldHint": True})
     def tv_desktop_set_symbol(

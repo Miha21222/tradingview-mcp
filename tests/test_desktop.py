@@ -83,8 +83,12 @@ _READ_TOOLS = {
     "tv_desktop_replay_status",
     "tv_desktop_pine_get_source",
     "tv_desktop_pine_list_scripts",
+    "tv_desktop_ui_find_element",
+    "tv_desktop_check_levels",
 }
 _WRITE_TOOLS = {
+    "tv_desktop_launch",
+    "tv_desktop_ui_click",
     "tv_desktop_set_symbol",
     "tv_desktop_set_timeframe",
     "tv_desktop_draw",
