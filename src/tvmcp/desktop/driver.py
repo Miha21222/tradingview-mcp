@@ -124,9 +124,9 @@ def _chart_targets(cdp_url: str) -> list[dict]:
     except Exception as exc:
         raise ToolError(
             f"Cannot reach TradingView Desktop CDP at {cdp_url}: {exc}. Launch the "
-            "app with scripts/start-tv-desktop.ps1 (it must be started with "
-            "--remote-debugging-port; note 9222 may be taken by another tool - the "
-            "launcher defaults to 9223, set TV_CDP_URL to match)."
+            "app with tv_desktop_launch (or scripts/start-tv-desktop.ps1; it must "
+            "be started with --remote-debugging-port; note 9222 is often taken by "
+            "another CDP tool - the launcher defaults to 9223, set TV_CDP_URL to match)."
         ) from exc
     charts = [
         t for t in targets
@@ -140,30 +140,121 @@ def _chart_targets(cdp_url: str) -> list[dict]:
     return charts
 
 
+# --- target selection (M8) ---------------------------------------------------
+#
+# A layout with several chart tabs (or a stale hidden one) used to be picked by
+# `document.visibilityState` alone, which lies for a minimized window and ties
+# between tabs. Each chart target is now scored by a short in-page probe:
+# requestAnimationFrame ticks over ~300 ms (a painting tab), TradingViewApi
+# presence, a visible Monaco editor, and visibilityState. The winner is BOUND
+# for `_REBIND_AFTER_S`; after that we re-score and switch only if ANOTHER tab
+# paints (raf > 0) and scores strictly higher - a minimized window throttles
+# every tab, and thrashing between equally-dead tabs helps nobody. Every call
+# still opens a fresh websocket (the M4 model); only the target id is cached.
+# Each Runtime.evaluate stays well under the 15 s websocket timeout.
+
+_PROBE_JS = """
+/*tvmcp:probe*/
+(new Promise((resolve) => {
+  let raf = 0;
+  const t0 = performance.now();
+  const tick = () => { raf++; if (performance.now() - t0 < 300) requestAnimationFrame(tick); };
+  try { requestAnimationFrame(tick); } catch (e) {}
+  setTimeout(() => {
+    let monaco = false;
+    try {
+      const m = document.querySelector('.monaco-editor');
+      monaco = !!(m && m.getBoundingClientRect().height > 0);
+    } catch (e) {}
+    resolve({raf: raf, api: !!window.TradingViewApi, monaco_visible: monaco,
+             visibility: document.visibilityState});
+  }, 320);
+}))
+"""
+
+_REBIND_AFTER_S = 5.0
+_bound: dict | None = None  # {target_id, score, at, chart_tabs} - reset in tests
+_now = time.monotonic  # injectable clock for tests
+
+
+def _score(probe: dict | None) -> int:
+    if not probe:
+        return -1
+    return (
+        (8 if (probe.get("raf") or 0) > 0 else 0)
+        + (4 if probe.get("api") else 0)
+        + (2 if probe.get("monaco_visible") else 0)
+        + (1 if probe.get("visibility") == "visible" else 0)
+    )
+
+
+def _connect(target: dict) -> _Cdp:
+    return _Cdp(target["webSocketDebuggerUrl"])
+
+
+def _probe_target(target: dict) -> dict:
+    """Score one chart target; a failed eval scores -1 (never raises)."""
+    out = {"id": target.get("id"), "score": -1, "raf": 0}
+    try:
+        cdp = _connect(target)
+    except Exception as exc:
+        out["error"] = str(exc)
+        return out
+    try:
+        res = DesktopPage(cdp).eval(_PROBE_JS, await_promise=True) or {}
+        out.update(res)
+        out["score"] = _score(res)
+    except Exception as exc:
+        out["error"] = str(exc)
+    finally:
+        cdp.close()
+    return out
+
+
+def _select_target(charts: list[dict]) -> dict:
+    global _bound
+    now = _now()
+    by_id = {t.get("id"): t for t in charts}
+    if _bound and _bound["target_id"] in by_id:
+        if now - _bound["at"] < _REBIND_AFTER_S:
+            _bound["chart_tabs"] = len(charts)
+            return by_id[_bound["target_id"]]
+        scored = [_probe_target(t) for t in charts]
+        cur = next(s for s in scored if s["id"] == _bound["target_id"])
+        best = max(scored, key=lambda s: s["score"])
+        if best["id"] != cur["id"] and best["raf"] > 0 and best["score"] > cur["score"]:
+            _bound = {"target_id": best["id"], "score": best["score"], "at": now,
+                      "chart_tabs": len(charts)}
+        else:
+            _bound.update(score=cur["score"], at=now, chart_tabs=len(charts))
+        return by_id[_bound["target_id"]]
+    scored = [_probe_target(t) for t in charts]
+    best = max(scored, key=lambda s: s["score"])  # ties -> first chart tab
+    if best["score"] < 0:
+        raise ToolError("Could not evaluate in any TradingView chart tab; retry.")
+    _bound = {"target_id": best["id"], "score": best["score"], "at": now,
+              "chart_tabs": len(charts)}
+    return by_id[best["id"]]
+
+
+def bound_target() -> dict | None:
+    """The chart target the driver is currently bound to (for tv_desktop_status)."""
+    if not _bound:
+        return None
+    return {"id": _bound["target_id"], "score": _bound["score"],
+            "chart_tabs": _bound["chart_tabs"]}
+
+
 @contextmanager
 def cdp_page(cdp_url: str):
-    """Yield the visible TradingView chart page (first chart tab as fallback)."""
+    """Yield the best-scoring TradingView chart page (bound for a few seconds)."""
     charts = _chart_targets(cdp_url)
-    chosen, cdp = None, None
+    target = _select_target(charts)
+    cdp = _connect(target)
     try:
-        for t in charts:
-            c = _Cdp(t["webSocketDebuggerUrl"])
-            page = DesktopPage(c)
-            try:
-                status = page.eval(_STATUS_JS) or {}
-            except ToolError:
-                c.close()
-                continue
-            if status.get("visible") or t is charts[-1]:
-                chosen, cdp = page, c
-                break
-            c.close()
-        if chosen is None:  # every eval failed
-            raise ToolError("Could not evaluate in any TradingView chart tab; retry.")
-        yield chosen
+        yield DesktopPage(cdp)
     finally:
-        if cdp is not None:
-            cdp.close()
+        cdp.close()
 
 
 def read_status(page) -> dict:
@@ -272,33 +363,48 @@ def set_timeframe(page, canonical_tf: str) -> dict:
 # throws "Not implemented" in the desktop build). Borrowed from tradesdontlie
 # chart.js.
 
+# Shared history-paging helper (viewport + bars): `pageBack(ms, from, maxPages)`
+# requests 1000 more bars while the earliest loaded bar is newer than `from`
+# and the feed still has more; returns {pages, earliest, exhausted}.
+_PAGE_BACK_JS = """
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const earliestOf = (ms) => {
+    try { const b = ms.bars(); const fv = b.valueAt(b.firstIndex()); return fv ? fv[0] : null; }
+    catch (e) { return null; }
+  };
+  const pageBack = async (ms, from, maxPages) => {
+    let pages = 0, earliest = earliestOf(ms), exhausted = false;
+    for (let i = 0; ms && from != null && i < maxPages; i++) {
+      const b = ms.bars();
+      earliest = earliestOf(ms);
+      let more = true;
+      try { more = ms.requestMoreDataAvailable(); } catch (e) {}
+      if (earliest == null || earliest <= from) break;
+      if (!more) { exhausted = true; break; }
+      const before = b.firstIndex();
+      try { ms.requestMoreData(1000); } catch (e) { break; }
+      pages++;
+      for (let j = 0; j < 20; j++) {
+        await sleep(200);
+        if (ms.bars().firstIndex() !== before) break;
+      }
+    }
+    if (ms) earliest = earliestOf(ms) ?? earliest;
+    return {pages: pages, earliest: earliest, exhausted: exhausted};
+  };
+"""
+
 _VIEWPORT_JS = """
 /*tvmcp:viewport*/
 (new Promise(async (resolve) => {
   if (!window.TradingViewApi) return resolve({no_api: true});
   const p = __PAYLOAD__;
   const ch = window.TradingViewApi.activeChart();
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  __PAGING__
   let ms = null;
   try { ms = ch._chartWidget.model().mainSeries(); } catch (e) {}
-  let pages = 0, earliest = null, exhausted = false;
-  for (let i = 0; ms && i < p.max_pages; i++) {
-    const b = ms.bars();
-    const fv = b.valueAt(b.firstIndex());
-    earliest = fv ? fv[0] : null;
-    let more = true;
-    try { more = ms.requestMoreDataAvailable(); } catch (e) {}
-    if (earliest == null || earliest <= p.from) break;
-    if (!more) { exhausted = true; break; }
-    const before = b.firstIndex();
-    try { ms.requestMoreData(1000); } catch (e) { break; }
-    pages++;
-    for (let j = 0; j < 20; j++) {
-      await sleep(200);
-      if (ms.bars().firstIndex() !== before) break;
-    }
-  }
-  if (ms) { try { const fv = ms.bars().valueAt(ms.bars().firstIndex()); earliest = fv ? fv[0] : earliest; } catch (e) {} }
+  const pg = await pageBack(ms, p.from, p.max_pages);
+  const pages = pg.pages, earliest = pg.earliest, exhausted = pg.exhausted;
   // `setVisibleRange` is the public charting API but throws "Not implemented"
   // in the desktop build (verified 2026-09-19) - zoom by bar index instead.
   let method = 'zoomToBarsRange';
@@ -330,14 +436,74 @@ _VIEWPORT_JS = """
 """
 
 
+def _paging_js(template: str, payload: dict) -> str:
+    return (template.replace("__PAGING__", _PAGE_BACK_JS)
+            .replace("__PAYLOAD__", json.dumps(payload)))
+
+
 def set_visible_range(page, from_time: int, to_time: int, max_pages: int = 25) -> dict:
     payload = {"from": from_time, "to": to_time, "max_pages": max_pages}
-    res = page.eval(_VIEWPORT_JS.replace("__PAYLOAD__", json.dumps(payload)),
-                    await_promise=True)
+    res = page.eval(_paging_js(_VIEWPORT_JS, payload), await_promise=True)
     if not res or res.get("no_api"):
         raise ToolError(_NO_API)
     if res.get("error"):
         raise ToolError(f"Could not set the visible range: {res['error']}")
+    return res
+
+
+# --- bars (read the main series OHLCV off the live chart) ---------------------
+#
+# `mainSeries().bars()` rows are `[time, open, high, low, close, volume, ...]`
+# (time = unix seconds). Empty/NaN cells are mapped to null explicitly because
+# CDP's returnByValue drops NaN. When `since` is earlier than the earliest
+# loaded bar, history is paged back with the same helper the viewport uses.
+
+_BARS_JS = """
+/*tvmcp:bars*/
+(new Promise(async (resolve) => {
+  if (!window.TradingViewApi) return resolve({no_api: true});
+  const p = __PAYLOAD__;
+  const ch = window.TradingViewApi.activeChart();
+  __PAGING__
+  let ms = null;
+  try { ms = ch._chartWidget.model().mainSeries(); } catch (e) {}
+  if (!ms) return resolve({error: 'main series is not reachable on this chart'});
+  const pg = await pageBack(ms, p.since, p.max_pages);
+  const fin = (x) => (typeof x === 'number' && Number.isFinite(x)) ? x : null;
+  const b = ms.bars();
+  const fi = b.firstIndex(), li = b.lastIndex();
+  let rows = [];
+  for (let i = fi; i <= li; i++) {
+    const v = b.valueAt(i);
+    if (!v) continue;
+    if (p.since != null && v[0] < p.since) continue;
+    rows.push([v[0], fin(v[1]), fin(v[2]), fin(v[3]), fin(v[4]), fin(v[5])]);
+  }
+  const total = rows.length;
+  if (rows.length > p.count) rows = rows.slice(-p.count);
+  let sym = null, res = null;
+  try { sym = ch.symbol(); res = String(ch.resolution()); } catch (e) {}
+  resolve({symbol: sym, resolution: res, rows: rows, total_after_since: total,
+           loaded_bars: b.size(), earliest_loaded: pg.earliest,
+           pages_loaded: pg.pages, history_exhausted: pg.exhausted,
+           clamped: p.since != null && pg.earliest != null && pg.earliest > p.since});
+}))
+"""
+
+
+def read_bars(page, count: int, since_ts: int | None = None, max_pages: int = 25) -> dict:
+    """Rows `[t,o,h,l,c,v]` of the active chart's main series (newest last).
+
+    `since_ts` (unix seconds) pages history back until that time is loaded
+    (or the feed runs out - `clamped`), then keeps the last `count` rows at or
+    after it.
+    """
+    payload = {"count": int(count), "since": since_ts, "max_pages": max_pages}
+    res = page.eval(_paging_js(_BARS_JS, payload), await_promise=True)
+    if not res or res.get("no_api"):
+        raise ToolError(_NO_API)
+    if res.get("error"):
+        raise ToolError(f"Could not read bars: {res['error']}")
     return res
 
 
