@@ -308,9 +308,14 @@ _MENU_JS = """
   const vis = (el) => !!el && el.offsetParent !== null;
   const clean = (s) => String(s || '').replace(/\\s+/g, ' ').trim();
   const label = (el) => clean([el.textContent, el.getAttribute('title'), el.getAttribute('aria-label')].join(' | '));
+  // Live RU labels on TV Desktop 3.4.1: "Сохранить скрипт" (Ctrl + S),
+  // "Копировать…", "Переименовать…", "История версий…", "Переместить скрипт
+  // вниз", "Создать новый", "Открыть скрипт…" (Ctrl + O). The copy row reads
+  // "Копировать", not "Создать копию" - a bare /новый/ also matched the wrong
+  // rows, so both patterns are pinned to the real wording.
   const RE = {
-    copy: /make a copy|создать копию|копию/i,
-    new: /create new|new script|new blank|новый скрипт|создать новый|новый/i,
+    copy: /make a copy|make copy|создать копию|копировать|копию/i,
+    new: /create new|new script|new blank|новый скрипт|создать новый/i,
     save: /save script|^save\\b|сохранить скрипт|^сохранить\\b/i,
   };
   const menuItems = () => Array.from(document.querySelectorAll(
@@ -321,12 +326,19 @@ _MENU_JS = """
     const panel = (() => {
       let el = document.querySelector('.monaco-editor.pine-editor-monaco');
       for (let i = 0; el && i < 12; i++) {
-        if (el.querySelector && el.querySelector('[class*="saveButton"], [data-name="save-script"]')) return el;
+        if (el.querySelector && el.querySelector('[data-qa-id="pine-script-save-button"], [class*="saveButton"], [data-name="save-script"]')) return el;
         el = el.parentElement;
       }
       return document;
     })();
     const cands = [];
+    // The script-name control is a DIV (not a button) carrying a stable
+    // data-qa-id - verified live; clicking it opens this menu. It may sit
+    // outside the panel when the editor is a floating dialog, so look
+    // document-wide first.
+    for (const sel of ['[data-qa-id="pine-script-title-button"]', '[class*="nameButton"]']) {
+      const e = document.querySelector(sel); if (vis(e)) cands.push(e);
+    }
     for (const sel of ['[data-name="script-name-menu"]', '[data-name="pine-editor-menu"]', '[data-name="script-title"]', '[data-name="open-script"]']) {
       const e = panel.querySelector(sel); if (vis(e)) cands.push(e);
     }
@@ -349,8 +361,8 @@ _MENU_JS = """
     const iS = items.findIndex(i => /ctrl\\s*\\+\\s*s\\b/i.test(label(i)));
     const iO = items.findIndex(i => /ctrl\\s*\\+\\s*o\\b/i.test(label(i)));
     if (p.item === 'save' && iS >= 0) target = items[iS];
-    else if (p.item === 'copy') target = (iS >= 0 && items[iS + 1]) || (iO >= 0 && items[iO - 1]) || null;
-    else if (p.item === 'new') target = items[0];
+    else if (p.item === 'copy') target = (iS >= 0 && items[iS + 1]) || null;
+    else if (p.item === 'new') target = (iO >= 0 && items[iO - 1]) || null;
   }
   if (!target) return resolve({menu_opened: true, clicked: null, items: labels, opener: opener});
   const chosen = label(target).slice(0, 60);
