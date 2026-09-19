@@ -40,26 +40,35 @@ Mechanics you should know:
   password change rots it) — ask the human for a fresh one; nothing else fixes it.
 - `provider` is always `session`; treat its levels as feed-specific like any other.
 
-## Desktop tier (25 tools)
+## Desktop tier (29 tools)
 
 Read (also under `TV_READ_ONLY=1`): `tv_desktop_status`, `tv_desktop_screenshot`,
 `tv_desktop_list_drawings`, `tv_desktop_list_studies`, `tv_desktop_read_study_plots`,
 `tv_desktop_read_study_graphics`, `tv_desktop_read_strategy`, `tv_desktop_replay_status`,
-`tv_desktop_pine_get_source`, `tv_desktop_pine_list_scripts`.
-Write: `tv_desktop_set_symbol`, `tv_desktop_set_timeframe`, `tv_desktop_scroll_to_date`,
+`tv_desktop_pine_get_source`, `tv_desktop_pine_list_scripts`,
+`tv_desktop_ui_find_element`, `tv_desktop_check_levels`.
+Write: `tv_desktop_launch`, `tv_desktop_ui_click`,
+`tv_desktop_set_symbol`, `tv_desktop_set_timeframe`, `tv_desktop_scroll_to_date`,
 `tv_desktop_set_visible_range`, `tv_desktop_draw`, `tv_desktop_remove_drawing`,
 `tv_desktop_set_study_inputs`, `tv_desktop_replay_start/step/trade/stop`,
 `tv_desktop_pine_set_source`, `tv_desktop_pine_compile`, `tv_desktop_pine_save`,
 `tv_desktop_pine_open_script`.
 
 Setup:
-1. TradingView Desktop must run with a CDP flag: `scripts/start-tv-desktop.ps1`
-   launches it correctly (default port **9223** — 9222 is often owned by another
-   CDP app; a naive port check can false-positive on it).
-2. Set `TV_CDP_URL=http://127.0.0.1:9223`; enable `desktop` in `TV_TOOLSETS`.
-3. An instance started normally (no flag) must be closed first — the app is
-   single-instance, a second launch only focuses the running one.
-4. The human must be logged in with a chart open; verify via `tv_desktop_status`.
+1. Enable `desktop` in `TV_TOOLSETS`; `TV_CDP_URL` defaults to
+   `http://127.0.0.1:9223` (9222 is often owned by another CDP app; a naive
+   port check can false-positive on it).
+2. Call `tv_desktop_launch`: it finds the app (`TV_DESKTOP_EXE`, Store
+   package, `%LOCALAPPDATA%\Programs`), starts it with the CDP flag, and waits
+   for a chart tab. It returns `already_running` when CDP is already up, and
+   REFUSES with the exact fix when (a) the port belongs to another app — pick a
+   free `TV_CDP_URL` — or (b) TradingView is open without the flag: the app is
+   single-instance, so ask the human, close it, launch again. Never close it
+   yourself unasked. Manual fallback: `scripts/start-tv-desktop.ps1`.
+3. The human must be logged in with a chart open (`chart_tab: false` until
+   then); verify via `tv_desktop_status` — its `target` shows which chart tab
+   is bound (`chart_tabs` > 1 means several layouts are open; the driver binds
+   the one that paints and re-scores every 5 s).
 
 Operating notes:
 - `set_symbol` types into TV's quick-search; prefer exchange-qualified symbols
@@ -123,6 +132,19 @@ Operating notes:
   tool refuses unless `overwrite_saved=true`; get the user's OK first, or ask
   them to open a new blank script. `tv_desktop_pine_open_script` overwrites
   the editor text too.
+- UI fallback: `tv_desktop_ui_find_element` lists visible elements by
+  data-name / aria-label / button text / CSS selector; `tv_desktop_ui_click`
+  clicks only when exactly one matches (zero → `miss` + candidates, several →
+  `ambiguous`; refine, don't guess). Use it for dialogs and menus the chart
+  API cannot reach, then verify with a screenshot. TradingView ignores
+  synthetic Escape — dialogs are closed by clicking their Cancel/close button.
+- Level checks: `tv_desktop_check_levels(levels, since)` answers "has price
+  tagged IBH / PDL / this FVG since the open" on the chart's OWN bars
+  (`provider: desktop`), with `first_tag` (time + side) or `closest_approach`.
+  `since` takes ISO-8601 or `session:<name>[@date]` (fixed UTC session hours,
+  not DST-aware). A `coverage_warning` means the bars cannot answer — say so
+  instead of reporting "not tagged". `tv_scan_check_levels` is the free-feed
+  twin; feeds disagree, name the provider.
 - Keep this tier read-mostly and on request: community reports include
   TradingView account bans for automation that drives the account in bulk
   (alert/watchlist loops, symbol sweeps). One user, one chart, one task.

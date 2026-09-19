@@ -79,8 +79,15 @@ commands. This table covers everything else, per toolset.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Cannot reach TradingView Desktop CDP" | App not running, or running WITHOUT the debug flag | Launch via `scripts/start-tv-desktop.ps1`; an instance started normally must be closed first (single-instance: a second launch only focuses it) |
-| CDP answers but "NOT TradingView Desktop" | Another CDP app owns the port (common: 9222) | Use the launcher's port (9223) and set `TV_CDP_URL` to match |
+| "Cannot reach TradingView Desktop CDP" | App not running, or running WITHOUT the debug flag | `tv_desktop_launch` (finds the exe, starts it with the flag, waits for a chart tab); or `scripts/start-tv-desktop.ps1` |
+| tv_desktop_launch: "running WITHOUT the debug flag" | A flagless TradingView is open; the app is single-instance so a flagged launch would only focus it | Ask the user, then `Stop-Process -Name TradingView -Force` and call `tv_desktop_launch` again — the tool never closes their app itself |
+| tv_desktop_launch: "port owned by another CDP app" / CDP answers but "NOT TradingView Desktop" | Another CDP app owns the port (9222 is the usual victim - e.g. a browser panel) | Set `TV_CDP_URL` to a free port (default 9223) and launch again; never launch into a busy port (Chromium skips binding it silently) |
+| tv_desktop_launch: "executable not found" | Not a Store install and not under `%LOCALAPPDATA%\Programs` | Set `TV_DESKTOP_EXE` to the full path of TradingView.exe |
+| tv_desktop_launch returns `chart_tab: false` | App started but the user has not logged in / opened a chart | Wait for the human; `tv_desktop_status` once a chart is open |
+| Tools act on the wrong chart tab (`target.chart_tabs` > 1 in `tv_desktop_status`) | Several chart tabs; the driver binds the one that paints (rAF) and exposes the API, re-scoring every 5 s | Bring the wanted tab to front and wait 5 s; a minimized window throttles every tab, so restore the window first. `target.score` 13-15 = painting + API; 0-7 = throttled/loading |
+| tv_desktop_ui_click `miss: true` / `ambiguous: true` | Query matched zero / several visible elements | Use the returned `candidates` (data_name / aria_label / text) to refine; `tv_desktop_ui_find_element` first when unsure |
+| A dialog stays open after a tool | TradingView ignores synthetic Escape | Click its Cancel/close button via `tv_desktop_ui_click`; the tools that open dialogs already do this |
+| check_levels `coverage_warning` set | History starts after `since`, no bars after `since`, or the last bar is stale (> 2x timeframe) | Raise `count`, pick a later `since`, or (desktop) let the chart load / reconnect; never report "not tagged" while the warning is set |
 | "no TradingView chart tab" | App open but no chart / not logged in | Human opens a chart layout in the app |
 | set_symbol picked the wrong listing | TV quick-search matched another exchange | Pass the exchange-qualified form (`OANDA:EURUSD`); verify with `tv_desktop_screenshot` |
 | Tools broke after a TradingView update | UI selectors/keyboard flows changed | Known brittleness of the desktop tier; report it — the driver lives in `src/tvmcp/desktop/driver.py` |

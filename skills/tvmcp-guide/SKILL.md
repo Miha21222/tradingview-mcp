@@ -25,14 +25,14 @@ always.
 | core (always) | `tv_setup_doctor` | nothing | none |
 | `public` (default) | `tv_screener_run`, `tv_ta_summary`, `tv_symbol_search` | nothing | none (no account) |
 | `data` (default) | `tv_data_get_bars`, `tv_data_providers_status` | Node for Dukascopy; OANDA key optional | none (not TV data) |
-| `scan` | `tv_scan_fvg/ob/structure/liquidity/sessions/prev_hl` | bars available | none |
+| `scan` | `tv_scan_fvg/ob/structure/liquidity/sessions/prev_hl`, `tv_scan_check_levels` | bars available | none |
 | `chart` | `tv_chart_render` | `playwright install chromium` | none (own engine) |
 | `backtest` | `tv_backtest_run` | bars | none |
 | `strategy` | `tv_strategy_list/run` | YAML specs in strategy dir | none |
 | `journal` | `tv_journal_scan/parse` | FX Replay CSV exports | none |
 | `pine` | `tv_pine_compile` | network | low (undocumented endpoint) |
 | `session` | `tv_session_status/ohlcv/realtime` | `TV_SESSIONID` cookie | **yes — user's account** |
-| `desktop` | 25 desktop tools: `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor | app running with CDP | **yes — user's account** |
+| `desktop` | 29 desktop tools: `tv_desktop_launch`, `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor, `tv_desktop_ui_find_element/ui_click`, `tv_desktop_check_levels` | app running with CDP (`tv_desktop_launch` starts it) | **yes — user's account** |
 
 Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything;
 `hybrid` = data+scan+chart+backtest+pine+journal+strategy — the surface the official
@@ -70,8 +70,10 @@ load `tradingview-hybrid`.
   "what does my indicator show" → `tv_desktop_list_studies` + `read_study_*`;
   "change its settings" → `tv_desktop_set_study_inputs`; "backtest on my chart" →
   Pine Editor loop (`tv_desktop_pine_set_source` → `pine_compile`) + `tv_desktop_read_strategy`;
-  "walk me through that day" → `tv_desktop_replay_start/step/stop`. Details: the
-  `tradingview-tiers` skill.
+  "walk me through that day" → `tv_desktop_replay_start/step/stop`;
+  "has price tagged my level since the open" → `tv_scan_check_levels` (free feed)
+  or `tv_desktop_check_levels` (the chart's own bars); "the app isn't running" →
+  `tv_desktop_launch`. Details: the `tradingview-tiers` skill.
 
 ## Guiding a user from zero (the full path)
 

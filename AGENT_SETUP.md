@@ -203,15 +203,19 @@ request, and say that in your report.
 
 Setup (Windows; the app is a Microsoft Store package):
 
-1. The app must run with a debug port. If it is already open **without** the
-   flag, ask the human before closing it (the app is single-instance; a plain
-   relaunch only focuses the flagless copy). Then:
+1. The app must run with a debug port. Once `desktop` is enabled, the
+   `tv_desktop_launch` tool does this for you (finds the exe, starts it with
+   the flag, waits for CDP and a chart tab). It refuses — with the fix — when
+   TradingView is already open **without** the flag: ask the human before
+   closing it (the app is single-instance; a plain relaunch only focuses the
+   flagless copy). Manual equivalent:
    ```powershell
    Stop-Process -Name TradingView -Force -ErrorAction SilentlyContinue
    powershell -File scripts\start-tv-desktop.ps1 -Port 9223
    ```
    Port **9223** on purpose: 9222 is often owned by another CDP tool and
-   Chromium silently skips a busy port.
+   Chromium silently skips a busy port. `tv_desktop_launch` also refuses when
+   the port answers but belongs to another app — pick another `TV_CDP_URL`.
 2. Add `desktop` to `TV_TOOLSETS` and set `TV_CDP_URL=http://127.0.0.1:9223`
    on the `tradingview` server (re-add it, restart the client session).
 3. The human must be logged in with a chart open.
@@ -270,7 +274,7 @@ configure — then rerun `scripts/healthcheck.py`.
 TradingView MCP install — <date>
 - repo: <path>, commit <sha>, uv sync OK, Chromium OK
 - healthcheck: OK (optional missing: OANDA key, TV cookie, Desktop CDP)
-- registered: tradingview (hybrid, 17 tools; +25 desktop tools if the tier was requested) ✔ · mcp-tradingview ✔ / needs your /mcp sign-in
+- registered: tradingview (hybrid, 17 tools; +29 desktop tools if the tier was requested) ✔ · mcp-tradingview ✔ / needs your /mcp sign-in
 - smoke tests: doctor ✔ · bars ✔ · fvg ✔ · chart ✔ · official ohlcv ✔/skipped
 - next for you: <one line: e.g. "run /mcp → mcp-tradingview → sign in">
 ```
