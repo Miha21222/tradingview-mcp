@@ -30,12 +30,13 @@ always.
 | `backtest` | `tv_backtest_run` | bars | none |
 | `strategy` | `tv_strategy_list/run` | YAML specs in strategy dir | none |
 | `journal` | `tv_journal_scan/parse` | FX Replay CSV exports | none |
+| `sentinel` | `tv_sentinel_start/poll/status/stop` | bars available; a writable run dir (`TV_SENTINEL_DIR`) | none |
 | `pine` | `tv_pine_compile` | network | low (undocumented endpoint) |
 | `session` | `tv_session_status/ohlcv/realtime` | `TV_SESSIONID` cookie | **yes — user's account** |
 | `desktop` | 35 desktop tools: `tv_desktop_launch`, `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor, `tv_desktop_ui_find_element/ui_click`, `tv_desktop_check_levels`, `tv_desktop_workspace_prepare`, `tv_desktop_pine_build_and_backtest`, `pine_find_exact/replace_exact/save_as/get_errors` | app running with CDP (`tv_desktop_launch` starts it) | **yes — user's account** |
 
 Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything;
-`hybrid` = data+scan+chart+backtest+pine+journal+strategy — the surface the official
+`hybrid` = data+scan+chart+backtest+pine+journal+strategy+sentinel — the surface the official
 TradingView MCP does not cover, used when both servers run side by side).
 `TV_READ_ONLY=1` strips every workspace-mutating tool regardless of toolsets.
 For `session`/`desktop` details, load the `tradingview-tiers` skill; for the
@@ -65,6 +66,15 @@ load `tradingview-hybrid`.
   spec + `tv_strategy_run`.
 - "Check my Pine script" → `tv_pine_compile` in a write-compile-fix loop.
 - "What did I trade" → `tv_journal_scan` → `tv_journal_parse`.
+- "Watch this session for me / tell me when the range breaks" → the sentinel tools:
+  `tv_sentinel_start` with a spec (symbol, timeframe, session window, range window,
+  named levels, what confirms a break, clock marks), then `tv_sentinel_poll` on the
+  interval the run itself suggests (`next_poll_after_s`), passing `since_seq` =
+  the last `last_seq` you saw; `tv_sentinel_stop` when the session is done.
+  Nothing runs in the background - polling IS the mechanism, and polling twice
+  returns the same events. Use `replay: {from, to}` to run the same watch over a
+  past day. The events (`BREAK`, `SWEEP`, `RETEST`, ...) are observations, not
+  signals: any setup/risk/target judgement is yours, not the tool's.
 - "Show/drive my actual TradingView" → the desktop tools (opt-in): `tv_desktop_status`,
   `tv_desktop_screenshot`, `tv_desktop_set_symbol`/`set_timeframe`/`scroll_to_date`;
   "what does my indicator show" → `tv_desktop_list_studies` + `read_study_*`;
