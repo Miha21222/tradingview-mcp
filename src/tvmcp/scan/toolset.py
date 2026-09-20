@@ -248,12 +248,22 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
             "which ARE DST-correct. A session is labelled by the date it starts on; "
             "end <= start wraps past midnight. Max 8."))] = [],
         include: Annotated[list, Field(description=(
-            "Which blocks to compute: prev_day, prev_week, prev_month, sessions, "
-            "anchors, adr, opening_range, gaps (or ['all']). Empty = all."))] = [],
+            "Which blocks to compute: prev_day, prev_week, prev_month, prev_session, "
+            "sessions, anchors, adr, opening_range, gaps (or ['all']). Empty = all. "
+            "prev_day is the previous CALENDAR day in `tz`; prev_session is the "
+            "previous occurrence of one of `sessions` - different questions."))] = [],
         anchors: Annotated[list, Field(description=(
             "'Midnight open' style anchors: [{name, time: 'HH:MM', tz: IANA, "
             "day_offset}]. Each yields the OPEN of the first bar at or after that "
             "instant. Max 8."))] = [],
+        prev_session_name: Annotated[str, Field(description=(
+            "Which of `sessions` the `prev_session` block measures. Empty = the only "
+            "requested session; with several sessions it must be named (the error "
+            "lists them)."))] = "",
+        prev_session_count: Annotated[int, Field(description=(
+            "How many previous occurrences of that session to emit: 1 = 'RTH prev "
+            "high/low/close/open + range', 5 = also 'RTH prev-2 ...' .. 'RTH prev-5 ...'"
+        ), ge=1, le=10)] = 1,
         adr_days: Annotated[int, Field(description="Periods averaged for ADR", ge=1, le=60)] = 5,
         adr_session: Annotated[str, Field(description=(
             "Measure ADR over this session's range instead of the calendar day; must "
@@ -284,11 +294,18 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         """Pre-open level set for ANY symbol and ANY session definition (facts, not a plan).
 
         Computes, in one call: previous day high/low/close, previous week and
-        month high/low, each named session's high/low/open/close, "midnight
-        open" style anchors, ADR(n) with projections from a chosen anchor, an
-        opening-range / initial-balance block (size, size as a share of ADR,
-        extensions at configurable multiples above and below), and the gap
-        between consecutive occurrences of a session.
+        month high/low, the previous occurrence(s) of ONE named session, each
+        named session's high/low/open/close, "midnight open" style anchors,
+        ADR(n) with projections from a chosen anchor, an opening-range /
+        initial-balance block (size, size as a share of ADR, extensions at
+        configurable multiples above and below), and the gap between
+        consecutive occurrences of a session.
+
+        `prev_day` and `prev_session` answer different questions and usually
+        give different numbers: `prev_day` is the previous CALENDAR day in `tz`
+        (00:00-24:00, by default UTC), while `prev_session` is the previous time
+        the session in `prev_session_name` actually ran (`RTH prev high/low/
+        close/open` + its range; `prev_session_count` adds `RTH prev-2 ...`).
 
         Every level names how it was derived in `source`. Nothing is classified
         as good, wide, narrow or tradeable and no day plan is implied - that is
@@ -304,6 +321,8 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         out = _base(sym, tf, df, provider, "levels", {
             "date": date or None,
             "sessions": sessions or None,
+            "prev_session_name": prev_session_name or None,
+            "prev_session_count": prev_session_count,
             "adr_days": adr_days,
             "adr_session": adr_session or None,
             "opening_range_minutes": opening_range_minutes,
@@ -315,6 +334,8 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
             sessions=list(sessions) or None,
             include=list(include) or None,
             anchors=list(anchors) or None,
+            prev_session_name=prev_session_name,
+            prev_session_count=prev_session_count,
             adr_days=adr_days,
             adr_session=adr_session,
             adr_anchor=adr_anchor,

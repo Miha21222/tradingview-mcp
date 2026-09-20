@@ -10,6 +10,12 @@ volume, `time` tz-aware UTC):
 - previous day high/low/close, previous week high/low, previous month high/low
   (calendar periods in the caller's `tz`, so "previous day" is the previous day
   that actually traded);
+- the previous N occurrences of ONE named session (`prev_session`): high / low /
+  open / close and the occurrence's range. This is a different question from
+  `prev_day`: `prev_day` measures a calendar day in `tz` (by default the UTC
+  calendar day), `prev_session` measures the last time THAT session ran, which
+  on an RTH-style workflow is usually a different number. Both stay available
+  and each says which one it measured in its `source`.
 - per named session window: high / low / open / close;
 - "midnight open" style anchors: the open of the first bar at or after a named
   wall-clock time in a named IANA timezone;
@@ -56,13 +62,14 @@ __all__ = [
 DEFAULT_EXTENSIONS = (0.5, 1.0, 1.5, 2.0)
 DEFAULT_ADR_MULTIPLES = (0.5, 1.0)
 INCLUDE_KEYS = (
-    "prev_day", "prev_week", "prev_month",
+    "prev_day", "prev_week", "prev_month", "prev_session",
     "sessions", "anchors", "adr", "opening_range", "gaps",
 )
 MAX_SESSIONS = 8
 MAX_ANCHORS = 8
 MAX_MULTIPLES = 8
 MAX_DAY_OFFSET = 7
+MAX_PREV_SESSIONS = 10
 LOOKBACK_DAYS = 200  # hard cap when walking back for ADR periods
 GAP_LOOKBACK_DAYS = 14
 
@@ -349,6 +356,8 @@ def compute_levels(
     sessions=None,
     include=None,
     anchors=None,
+    prev_session_name: str = "",
+    prev_session_count: int = 1,
     adr_days: int = 5,
     adr_session: str = "",
     adr_anchor: str = "auto",
@@ -379,6 +388,11 @@ def compute_levels(
     if (not isinstance(opening_range_minutes, int) or isinstance(opening_range_minutes, bool)
             or not (1 <= opening_range_minutes <= 1440)):
         raise ToolError("opening_range_minutes must be a whole number 1..1440")
+    if (not isinstance(prev_session_count, int) or isinstance(prev_session_count, bool)
+            or not (1 <= prev_session_count <= MAX_PREV_SESSIONS)):
+        raise ToolError(
+            f"prev_session_count must be a whole number 1..{MAX_PREV_SESSIONS}"
+        )
 
     the_day = parse_day(day) or d["_local"].iloc[-1].date()
     warnings: list[str] = []
@@ -414,7 +428,8 @@ def compute_levels(
             )
             continue
         note = "oldest loaded period - may be truncated by the load window" if oldest else None
-        src = f"previous {kind} {prev['label']} ({tz}, {prev['bars']} bars)"
+        src = (f"previous {kind} {prev['label']} ({tz} calendar {kind} 00:00-24:00, "
+               f"{prev['bars']} bars) - NOT a session window")
         label = {"day": "Previous day", "week": "Previous week", "month": "Previous month"}[kind]
         levels.append(_level(f"{label} high", prev["high"], src, prev["last_bar_time"], note))
         levels.append(_level(f"{label} low", prev["low"], src, prev["last_bar_time"], note))
@@ -422,6 +437,20 @@ def compute_levels(
             levels.append(_level("Previous day close", prev["close"], src,
                                  prev["last_bar_time"], note))
         period_groups[f"prev_{kind}"] = prev
+
+    # ---- previous occurrences of ONE session -------------------------------- #
+    prev_sessions: list[dict] = []
+    if "prev_session" in inc:
+        prev_spec, pick_warn = _pick_prev_session(
+            prev_session_name, specs, _explicitly_named(include, "prev_session")
+        )
+        warnings.extend(pick_warn)
+        if prev_spec is not None:
+            prev_sessions, ps_warn, ps_levels = _prev_sessions(
+                d, prev_spec, the_day, prev_session_count, tf
+            )
+            warnings.extend(ps_warn)
+            levels.extend(ps_levels)
 
     # ---- sessions ---------------------------------------------------------- #
     session_out: list[dict] = []
@@ -553,6 +582,7 @@ def compute_levels(
         "bars_range": [_iso(first_bar), _iso(last_bar)],
         "include": sorted(inc),
         "sessions": session_out,
+        "prev_sessions": prev_sessions,
         "levels": levels,
         "adr": adr,
         "opening_range": opening_range,
@@ -578,6 +608,17 @@ def _include(include) -> set[str]:
             raise ToolError(f"Unknown include {k!r}; use any of {list(INCLUDE_KEYS)} or 'all'")
         out.add(key)
     return out
+
+
+def _explicitly_named(include, key: str) -> bool:
+    """True when the caller listed `key` itself (not through 'all' or the default)."""
+    if include is None:
+        return False
+    if isinstance(include, str):
+        include = [include]
+    if not isinstance(include, list):
+        return False
+    return any(str(k).strip().lower() == key for k in include)
 
 
 def _level(name: str, price, source: str, time_iso: str | None,
@@ -609,6 +650,137 @@ def _pick_session(name: str, specs: list[dict], what: str) -> dict:
             f"({[s['name'] for s in specs]})"
         )
     return hit
+
+
+# --------------------------------------------------------------------------- #
+# previous occurrences of one session
+# --------------------------------------------------------------------------- #
+def _pick_prev_session(name: str, specs: list[dict],
+                       explicit: bool) -> tuple[dict | None, list[str]]:
+    """Which session `prev_session` measures, or why it cannot be decided.
+
+    One requested session -> that one. Several -> the caller must name it: a
+    ToolError when they asked for `prev_session` themselves, a warning (and no
+    block) when it only arrived through `include: ['all']` / the default.
+    """
+    if not specs:
+        return None, [
+            "prev_session requested but no sessions given - nothing to measure; "
+            "pass `sessions` (a name or an explicit {name,start,end,tz} window)"
+        ]
+    if str(name).strip():
+        return _pick_session(name, specs, "prev_session_name"), []
+    if len(specs) == 1:
+        return specs[0], []
+    msg = (
+        "prev_session_name is required when several sessions are requested; "
+        f"name one of {[s['name'] for s in specs]}"
+    )
+    if explicit:
+        raise ToolError(msg)
+    return None, [f"{msg} - no previous-session levels emitted"]
+
+
+def _prev_session_prefix(name: str, k: int) -> str:
+    return f"{name} prev" if k == 1 else f"{name} prev-{k}"
+
+
+def _prev_sessions(d, spec, the_day, n, tf) -> tuple[list[dict], list[str], list[dict]]:
+    """The last `n` completed occurrences of `spec` strictly before `the_day`.
+
+    Walks back one calendar day at a time. A day on which the session did not
+    trade at all is simply not an occurrence (weekend, holiday) and the walk
+    continues. An occurrence the LOAD WINDOW cuts into is refused outright -
+    a partial session is not that session - and the walk stops there, because
+    everything older is cut worse. An occurrence that traded but did not fill
+    its window (early close, feed gap) IS emitted, carrying a note.
+    """
+    warnings: list[str] = []
+    levels: list[dict] = []
+    out: list[dict] = []
+    first_bar, last_bar = d["time"].iloc[0], d["time"].iloc[-1]
+    tol = pd.Timedelta(minutes=tf)
+
+    probe = the_day - timedelta(days=1)
+    steps = 0
+    while len(out) < n and steps < LOOKBACK_DAYS:
+        steps += 1
+        label = probe.isoformat()
+        start, end = session_bounds(spec, probe)
+        probe -= timedelta(days=1)
+        if end <= first_bar:
+            break  # older than the loaded history
+        sl = _slice(d, start, end)
+        if sl.empty:
+            continue  # the session did not trade that day
+        if start < first_bar:
+            warnings.append(
+                f"previous {spec['name']!r} session of {label} "
+                f"({_iso(start)}..{_iso(end)}) starts before the loaded history "
+                f"({_iso(first_bar)}) - refusing to measure a partial session; "
+                "raise `count`"
+            )
+            break
+        if end > last_bar + tol:
+            warnings.append(
+                f"previous {spec['name']!r} session of {label} "
+                f"({_iso(start)}..{_iso(end)}) has not finished in the loaded bars "
+                f"(last bar {_iso(last_bar)}) - skipped"
+            )
+            continue
+        o = _ohlc(sl)
+        complete = _covers(sl, start, end, tf)
+        k = len(out) + 1
+        occ = {
+            "index": k,
+            "name": spec["name"],
+            "date": label,
+            "start": spec["start"], "end": spec["end"], "tz": spec["tz"],
+            "window_utc": [_iso(start), _iso(end)],
+            "range": _r(o["high"] - o["low"]),
+            "complete": complete,
+            "source": spec["source"],
+            **o,
+        }
+        out.append(occ)
+        src = (
+            f"{spec['name']} session of {label} "
+            f"({spec['start']}-{spec['end']} {spec['tz']}) = "
+            f"{_iso(start)}..{_iso(end)}, {occ['bars']} bars; previous occurrence "
+            f"#{k} of that session before {the_day.isoformat()}"
+        )
+        note = None if complete else (
+            "the session's bars do not fill its window (late open, early close or a "
+            "gap in the feed) - the level is that occurrence's, measured over "
+            f"{occ['first_bar_time']}..{occ['last_bar_time']}"
+        )
+        if not complete:
+            warnings.append(
+                f"previous {spec['name']!r} session of {label} has {occ['bars']} bars "
+                f"spanning {occ['first_bar_time']}..{occ['last_bar_time']} inside "
+                f"{_iso(start)}..{_iso(end)} - a late open, an early close (holiday "
+                "half-day) or a gap in the feed; the levels are still that session's"
+            )
+        p = _prev_session_prefix(spec["name"], k)
+        levels.append(_level(f"{p} high", o["high"], src, o["last_bar_time"], note))
+        levels.append(_level(f"{p} low", o["low"], src, o["last_bar_time"], note))
+        levels.append(_level(f"{p} close", o["close"], src, o["last_bar_time"], note))
+        levels.append(_level(f"{p} open", o["open"], src, o["first_bar_time"], note))
+        levels.append(_zone_level(f"{p} range", o["high"], o["low"],
+                                  f"{src}; range {occ['range']}", o["last_bar_time"], note))
+
+    if not out:
+        warnings.append(
+            f"no previous occurrence of the {spec['name']!r} session "
+            f"({spec['start']}-{spec['end']} {spec['tz']}) before {the_day.isoformat()} "
+            "in the loaded bars - no previous-session levels emitted"
+        )
+    elif len(out) < n:
+        warnings.append(
+            f"prev_session: only {len(out)} of {n} requested occurrences of "
+            f"{spec['name']!r} are in the loaded bars - raise `count` for more"
+        )
+    return out, warnings, levels
 
 
 # --------------------------------------------------------------------------- #

@@ -67,11 +67,21 @@ load `tradingview-hybrid`.
 - "Get me price history" → `tv_data_get_bars` (free feeds). TV-chart-parity candles
   specifically → `tv_session_ohlcv` (opt-in, cookie).
 - "Find setups / structure / liquidity" → the scan tools (`tv_scan_fvg`, `tv_scan_ob`, `tv_scan_structure`, `tv_scan_liquidity`, `tv_scan_sessions`, `tv_scan_prev_hl`), then `tv_chart_render` to show it.
-- "What levels do I mark before the open" (previous day/week/month, session
-  high/low/open/close, midnight open, ADR and its projections, the opening
-  range / initial balance with extensions, the overnight gap) → `tv_scan_levels`,
+- "What levels do I mark before the open" (previous day/week/month, the previous
+  occurrence of your own session, session high/low/open/close, midnight open, ADR
+  and its projections, the opening range / initial balance with extensions, the
+  overnight gap) → `tv_scan_levels`,
   then `tv_scan_check_levels` later to ask whether price tagged any of them.
   It returns facts only — which of those levels matter is your judgment.
+  **Settle which "previous day" they mean before you answer:** `include: prev_day`
+  is the calendar day in `tz` (UTC by default, 00:00–24:00); `include: prev_session`
+  with `prev_session_name` is the last time THAT session ran (`RTH prev
+  high/low/close/open` plus its range; `prev_session_count: 5` adds `RTH prev-2 …`
+  through `RTH prev-5 …`). On the same date they are different numbers. A trader
+  who reports in their own timezone usually means the calendar day of THAT zone:
+  either set `tz` to it, or pass it as a session window
+  (`{"name":"EETday","start":"00:00","end":"00:00","tz":"Europe/Kyiv"}` — an end at
+  or before the start wraps, so that window is a full local day).
 - "What's on the calendar / is the market open today / when does ES roll" →
   `tv_calendar_check` (`countries`, `min_impact`, `week`, `symbol`). If it
   answers `degraded: true`, both live feeds were down and you are looking at a

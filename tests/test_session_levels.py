@@ -4,7 +4,8 @@ Every expectation below is hand-checked against synthetic bars built in this
 file: flat 100.00 candles with a handful of explicit overrides, so each high,
 low, range, average and extension can be read off by eye. No network.
 
-Covered: previous day high/low/close, previous week / month high-low, session
+Covered: previous day high/low/close, previous session (its own last occurrence,
+including N of them and a DST-crossing window), previous week / month high-low, session
 high/low/open/close, ADR over a known series (including the dropped oldest
 period), the opening range with its size, its share of ADR and its extensions,
 gap size between consecutive session occurrences and between calendar days,
@@ -80,6 +81,27 @@ RTH = {"name": "RTH", "start": "13:30", "end": "20:00", "tz": "UTC"}
 DAY = "2026-09-18"
 
 
+def _rth_frame() -> pd.DataFrame:
+    """Four days whose RTH windows (13:30-20:00 UTC) all differ from their UTC day.
+
+    2026-09-15 RTH high 111 low  91
+    2026-09-16 RTH high 122 low  92, opens at 99
+    2026-09-17 RTH high 133 low  93, opens at 103, closes at 107; the UTC day
+               additionally spikes to 140/80 at 02:00, outside RTH
+    2026-09-18 the day under test, bars from 06:00
+    """
+    rows = []
+    rows += _day("2026-09-15", {"14:00": (101.0, 111.0, 91.0, 101.0)})
+    rows += _day("2026-09-16", {"13:30": (99.0, 100.0, 99.0, 99.5),
+                                "14:00": (102.0, 122.0, 92.0, 102.0)})
+    rows += _day("2026-09-17", {"02:00": (BASE, 140.0, 80.0, BASE),
+                                "13:30": (103.0, 103.0, 103.0, 103.0),
+                                "14:00": (BASE, 133.0, 93.0, BASE),
+                                "19:45": (BASE, BASE, BASE, 107.0)})
+    rows += _day("2026-09-18", {"13:30": (101.0, 105.0, 101.0, 104.0)}, start_min=360)
+    return _frame(rows)
+
+
 def _levels(out: dict) -> dict:
     return {lv["name"]: lv for lv in out["levels"]}
 
@@ -122,6 +144,145 @@ def test_missing_previous_period_warns_instead_of_inventing():
     assert out["levels"] == []
     assert any("previous week" in w for w in out["warnings"])
     assert any("previous month" in w for w in out["warnings"])
+
+
+# --------------------------------------------------------------------------- #
+# previous SESSION (not the previous calendar day)
+# --------------------------------------------------------------------------- #
+def test_previous_session_measures_its_own_last_occurrence():
+    out = SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH],
+                            include=["prev_session"], timeframe_minutes=15)
+    lv = _levels(out)
+    assert lv["RTH prev high"]["price"] == 133.0
+    assert lv["RTH prev low"]["price"] == 93.0
+    assert lv["RTH prev open"]["price"] == 103.0
+    assert lv["RTH prev close"]["price"] == 107.0
+    rng = lv["RTH prev range"]
+    assert rng["kind"] == "zone" and (rng["high"], rng["low"]) == (133.0, 93.0)
+    [occ] = out["prev_sessions"]
+    assert occ["date"] == "2026-09-17" and occ["range"] == 40.0
+    assert occ["window_utc"] == ["2026-09-17T13:30:00Z", "2026-09-17T20:00:00Z"]
+    assert occ["bars"] == 26 and occ["complete"] is True
+    # the source names the exact window it measured: date, UTC bounds, bar count
+    src = lv["RTH prev high"]["source"]
+    assert "RTH session of 2026-09-17" in src
+    assert "2026-09-17T13:30:00Z..2026-09-17T20:00:00Z" in src and "26 bars" in src
+    assert out["warnings"] == []
+
+
+def test_previous_session_and_previous_day_are_different_questions():
+    out = SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH],
+                            include=["prev_day", "prev_session"], timeframe_minutes=15)
+    lv = _levels(out)
+    # same date, different window: the UTC day caught the 02:00 spike, RTH did not
+    assert (lv["Previous day high"]["price"], lv["Previous day low"]["price"]) == (140.0, 80.0)
+    assert (lv["RTH prev high"]["price"], lv["RTH prev low"]["price"]) == (133.0, 93.0)
+    assert "UTC calendar day" in lv["Previous day high"]["source"]
+    assert "13:30-20:00 UTC" in lv["RTH prev high"]["source"]
+
+
+def test_previous_n_sessions_are_numbered_newest_first():
+    out = SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH],
+                            include=["prev_session"], prev_session_count=3,
+                            timeframe_minutes=15)
+    assert [o["date"] for o in out["prev_sessions"]] == [
+        "2026-09-17", "2026-09-16", "2026-09-15"]
+    lv = _levels(out)
+    assert lv["RTH prev high"]["price"] == 133.0
+    assert lv["RTH prev-2 high"]["price"] == 122.0
+    assert lv["RTH prev-2 open"]["price"] == 99.0
+    assert lv["RTH prev-3 high"]["price"] == 111.0
+    assert lv["RTH prev-3 low"]["price"] == 91.0
+
+
+def test_prev_session_count_beyond_the_history_warns_for_the_missing_ones():
+    out = SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH],
+                            include=["prev_session"], prev_session_count=5,
+                            timeframe_minutes=15)
+    assert len(out["prev_sessions"]) == 3
+    assert any("only 3 of 5 requested occurrences" in w for w in out["warnings"])
+
+
+def test_prev_session_needs_a_name_when_several_sessions_are_requested():
+    other = {"name": "London", "start": "07:00", "end": "11:00", "tz": "UTC"}
+    with pytest.raises(ToolError) as ei:
+        SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH, other],
+                          include=["prev_session"], timeframe_minutes=15)
+    msg = str(ei.value)
+    assert "prev_session_name is required" in msg and "'RTH'" in msg and "'London'" in msg
+    # naming one settles it
+    out = SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH, other],
+                            include=["prev_session"], prev_session_name="London",
+                            timeframe_minutes=15)
+    assert [o["name"] for o in out["prev_sessions"]] == ["London"]
+    # a name that is not among them is an error that lists the ones that are
+    with pytest.raises(ToolError) as ei2:
+        SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH, other],
+                          include=["prev_session"], prev_session_name="Tokyo",
+                          timeframe_minutes=15)
+    assert "not one of the requested sessions" in str(ei2.value)
+    assert "London" in str(ei2.value)
+
+
+def test_ambiguous_prev_session_only_warns_when_it_came_from_include_all():
+    other = {"name": "London", "start": "07:00", "end": "11:00", "tz": "UTC"}
+    out = SL.compute_levels(_rth_frame(), day=DAY, sessions=[RTH, other],
+                            timeframe_minutes=15)  # include = everything
+    assert out["prev_sessions"] == []
+    assert any("prev_session_name is required" in w for w in out["warnings"])
+    assert not any(lv["name"].startswith("RTH prev ") for lv in out["levels"])
+
+
+def test_prev_session_with_no_bars_warns_and_emits_no_level():
+    rows = _day(DAY, start_min=360)  # only the day under test is loaded
+    out = SL.compute_levels(_frame(rows), day=DAY, sessions=[RTH],
+                            include=["prev_session"], timeframe_minutes=15)
+    assert out["prev_sessions"] == [] and out["levels"] == []
+    assert any("no previous occurrence of the 'RTH' session" in w for w in out["warnings"])
+
+
+def test_prev_session_refuses_a_window_the_load_cut_in_half():
+    rows = _day("2026-09-17", start_min=15 * 60)  # history starts inside that RTH
+    rows += _day(DAY, start_min=360)
+    out = SL.compute_levels(_frame(rows), day=DAY, sessions=[RTH],
+                            include=["prev_session"], timeframe_minutes=15)
+    assert out["prev_sessions"] == [] and out["levels"] == []
+    assert any("refusing to measure a partial session" in w for w in out["warnings"])
+
+
+def test_prev_session_that_closed_early_is_still_that_session():
+    # a holiday half-day: the occurrence traded, it just did not fill its window.
+    # Skipping it would silently report a DIFFERENT day, so it is emitted + noted.
+    rows = _day("2026-09-17", {"14:00": (BASE, 133.0, 93.0, BASE)},
+                start_min=13 * 60 + 30, end_min=16 * 60)
+    rows += _day(DAY, start_min=360)
+    out = SL.compute_levels(_frame(rows), day=DAY, sessions=[RTH],
+                            include=["prev_session"], timeframe_minutes=15)
+    [occ] = out["prev_sessions"]
+    assert occ["date"] == "2026-09-17" and occ["bars"] == 10 and occ["complete"] is False
+    lv = _levels(out)
+    assert lv["RTH prev high"]["price"] == 133.0
+    assert "early close" in lv["RTH prev high"]["note"]
+    assert any("early close" in w for w in out["warnings"])
+
+
+def test_previous_session_crossing_dst_is_the_previous_local_session():
+    # 2026-03-08 is the US spring-forward, so 03-06 RTH is EST (14:30-21:00 UTC)
+    # while 03-09 RTH is EDT (13:30-20:00 UTC). A fixed-UTC window would have
+    # measured 13:30-20:00 on 03-06 and returned 150 / 100 instead of 140 / 60.
+    ny = {"name": "RTH", "start": "09:30", "end": "16:00", "tz": "America/New_York"}
+    rows = _day("2026-03-05")
+    rows += _day("2026-03-06", {"13:45": (BASE, 150.0, BASE, BASE),
+                                "20:15": (BASE, 140.0, 60.0, BASE)})
+    rows += _day("2026-03-09", start_min=13 * 60 + 30)
+    out = SL.compute_levels(_frame(rows), day="2026-03-09", sessions=[ny],
+                            include=["prev_session"], timeframe_minutes=15)
+    [occ] = out["prev_sessions"]
+    assert occ["date"] == "2026-03-06"  # the previous Friday, not "24h earlier"
+    assert occ["window_utc"] == ["2026-03-06T14:30:00Z", "2026-03-06T21:00:00Z"]
+    lv = _levels(out)
+    assert lv["RTH prev high"]["price"] == 140.0
+    assert lv["RTH prev low"]["price"] == 60.0
 
 
 # --------------------------------------------------------------------------- #
@@ -355,6 +516,10 @@ def test_bad_arguments_raise_toolerror():
         ({"sessions": [RTH], "adr_anchor": "vibes"}, "Unknown adr_anchor"),
         ({"extensions": [0]}, "must be > 0"),
         ({"adr_days": 0}, "adr_days"),
+        ({"prev_session_count": 0}, "prev_session_count must be a whole number 1..10"),
+        ({"prev_session_count": 11}, "prev_session_count must be a whole number 1..10"),
+        ({"sessions": [RTH], "include": ["prev_session"], "prev_session_name": "Tokyo"},
+         "not one of the requested sessions"),
     ):
         with pytest.raises(ToolError) as ei:
             SL.compute_levels(df, timeframe_minutes=15, **kwargs)
@@ -410,6 +575,20 @@ def test_tool_names_its_feed_and_returns_the_blocks(tmp_path):
     names = {lv["name"] for lv in data["levels"]}
     assert {"Previous day high", "RTH high", "RTH OR high", "ADR +1"} <= names
     assert all({"name", "kind", "source", "time", "note"} <= set(lv) for lv in data["levels"])
+
+
+def test_tool_passes_the_prev_session_arguments(tmp_path):
+    data = _data(_build(tmp_path, _rth_frame()), "tv_scan_levels", {
+        "symbol": "EURUSD", "timeframe": "M15", "date": DAY, "sessions": [RTH],
+        "include": ["prev_session"], "prev_session_name": "RTH",
+        "prev_session_count": 2,
+    })
+    assert data["params"]["prev_session_name"] == "RTH"
+    assert data["params"]["prev_session_count"] == 2
+    assert [o["date"] for o in data["prev_sessions"]] == ["2026-09-17", "2026-09-16"]
+    names = {lv["name"] for lv in data["levels"]}
+    assert {"RTH prev high", "RTH prev low", "RTH prev close", "RTH prev open",
+            "RTH prev range", "RTH prev-2 high"} <= names
 
 
 def test_tool_registers_under_read_only(tmp_path):

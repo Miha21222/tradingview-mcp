@@ -34,6 +34,10 @@ commands. This table covers everything else, per toolset.
 | `tv_scan_levels`: "session ... has no bars" | The window genuinely has no candles (market closed, or the feed starts later) | Not an error — the tool refuses to invent a level. Check the session hours and `tz`, or raise `count` |
 | `tv_scan_levels`: "ADR: only N of M periods" / "history starts at ..." | `count` does not reach far enough back for `date` + `adr_days` | Raise `count` (M15 needs ~96 bars per day) or lower `adr_days` |
 | Session levels look an hour off | Named sessions come from the fixed-UTC table and are **not** DST-aware | Pass an explicit window instead: `{"name":"RTH","start":"09:30","end":"16:00","tz":"America/New_York"}` |
+| "Previous day high/low" disagrees with the trader's own numbers | `prev_day` is the calendar day in `tz` (UTC by default); their journal usually means their session, or the calendar day of their reporting timezone | Ask which, then use `include: ["prev_session"]` + `prev_session_name` for the session, or set `tz` / pass a `00:00`–`00:00` window in their zone for the local day. Every level's `source` says which window it measured |
+| `tv_scan_levels`: "prev_session_name is required when several sessions are requested" | More than one entry in `sessions`, so "the previous session" is ambiguous | Name one (the message lists them). Reaching it through `include: ["all"]` only warns and skips the block |
+| `tv_scan_levels`: "refusing to measure a partial session" | The loaded history starts inside that previous occurrence | Raise `count` (M15: ~96 bars per day, and the account feed always returns the LAST `count` bars) — the tool will not average half a session into a level |
+| `RTH prev ...` carries a note about a late open / early close | The occurrence traded but did not fill its window (holiday half-day, feed gap) | Expected, and the level is still that session's. The note and warning name the bars actually covered — quote them rather than silently using the day before |
 
 ## Calendar (`tv_calendar_check`)
 
