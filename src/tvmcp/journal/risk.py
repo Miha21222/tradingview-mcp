@@ -36,8 +36,47 @@ DEFAULT_RULES_PATH = Path(__file__).with_name("risk_rules.example.json")
 _RANK = {"ok": 0, "unknown": 1, "flag": 2, "stop": 3}
 _LOSS_CHECKS = {"daily_loss": "day", "weekly_loss": "week", "monthly_loss": "month"}
 
+KNOWN_CHECKS = frozenset({
+    "daily_loss", "weekly_loss", "monthly_loss",
+    "max_trades_per_day", "max_losses_per_day", "max_trades_per_week",
+    "consecutive_losses", "floor_buffer", "min_rest", "idle",
+    "profit_target_day", "profit_target_week",
+})
+
 
 # ---------------------------------------------------------------- rules I/O
+
+def _validate_rules(rules: dict, where: str) -> None:
+    """Fail with an actionable message, never a traceback, on a misshapen config.
+
+    `checks` keyed by check id is easy to get wrong - a list of check objects is
+    the obvious guess, and it used to die inside the accessor with
+    `'list' object has no attribute 'get'`, which tells the caller nothing.
+    """
+    checks = rules.get("checks")
+    if checks is None:
+        return
+    if isinstance(checks, list):
+        named = [c.get("id") for c in checks if isinstance(c, dict) and c.get("id")]
+        hint = ""
+        if named:
+            hint = " e.g. " + json.dumps({"checks": {str(named[0]): {"limit": {"pct": 2}}}})
+        raise ValueError(
+            f"{where}: `checks` must be an OBJECT keyed by check id, not a list. "
+            f"Turn each entry's `id` into the key and drop the `id` field.{hint}"
+        )
+    if not isinstance(checks, dict):
+        raise ValueError(f"{where}: `checks` must be an object keyed by check id")
+    bad = sorted(k for k, v in checks.items() if not k.startswith("_") and not isinstance(v, dict))
+    if bad:
+        raise ValueError(f"{where}: every check must be an object; these are not: {', '.join(bad)}")
+    unknown = sorted(k for k in checks if not k.startswith("_") and k not in KNOWN_CHECKS)
+    if unknown:
+        raise ValueError(
+            f"{where}: unknown check(s) {', '.join(unknown)}. "
+            f"Known checks: {', '.join(sorted(KNOWN_CHECKS))}"
+        )
+
 
 def load_rules(rules: dict | None = None, rules_path: str | Path | None = None) -> tuple[dict, list[str]]:
     """Resolve the rules config. Falls back to the shipped example, loudly."""
@@ -47,6 +86,7 @@ def load_rules(rules: dict | None = None, rules_path: str | Path | None = None) 
     if rules is not None:
         if not isinstance(rules, dict):
             raise ValueError("rules must be an object")
+        _validate_rules(rules, "rules")
         return rules, warnings
     path = Path(rules_path) if rules_path else DEFAULT_RULES_PATH
     if rules_path and not path.exists():
@@ -59,6 +99,7 @@ def load_rules(rules: dict | None = None, rules_path: str | Path | None = None) 
     loaded = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(loaded, dict):
         raise ValueError(f"{path.name}: rules must be a JSON object")
+    _validate_rules(loaded, path.name)
     return loaded, warnings
 
 

@@ -438,3 +438,37 @@ def test_tool_reads_a_journal_file_and_propagates_fail_closed(tmp_path):
     assert data["status"] == "stop"
     assert data["origin"]["mapping_used"]["r_multiple"] == "result_r"
     assert check(data, "journal_integrity")["status"] == "stop"
+
+
+def test_a_list_of_checks_says_how_to_fix_it_instead_of_a_traceback():
+    """`checks` keyed by id is easy to get wrong; the guess must be corrected, not crash.
+
+    Before this the accessor died with `'list' object has no attribute 'get'`,
+    which tells the caller nothing about their config.
+    """
+    from tvmcp.journal import risk
+
+    with pytest.raises(ValueError) as exc:
+        risk.load_rules(rules={"checks": [{"id": "daily_loss", "limit": {"pct": 2}}]})
+    msg = str(exc.value)
+    assert "must be an OBJECT keyed by check id" in msg
+    assert '"daily_loss"' in msg  # the hint shows the caller's own check id
+
+
+def test_an_unknown_check_name_lists_the_known_ones():
+    from tvmcp.journal import risk
+
+    with pytest.raises(ValueError) as exc:
+        risk.load_rules(rules={"checks": {"dayly_loss": {"limit": {"pct": 2}}}})
+    msg = str(exc.value)
+    assert "unknown check(s) dayly_loss" in msg
+    assert "daily_loss" in msg
+
+
+def test_a_check_that_is_not_an_object_is_named():
+    from tvmcp.journal import risk
+
+    with pytest.raises(ValueError) as exc:
+        risk.load_rules(rules={"checks": {"daily_loss": 2}})
+    assert "every check must be an object" in str(exc.value)
+    assert "daily_loss" in str(exc.value)
