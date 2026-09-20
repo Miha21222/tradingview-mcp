@@ -24,7 +24,7 @@ import pandas as pd
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from ..bars import choose_provider, load_bars, window
+from ..bars import SESSION_PROVIDER, choose_provider, load_bars_any, window
 from ..cache import BarCache
 from ..config import Settings
 from ..symbols import resolve, resolve_timeframe
@@ -52,10 +52,7 @@ def _resolve_symbol_tf(symbol: str, timeframe: str):
 
 def _default_load(settings: Settings, cache: BarCache, symbol: str, timeframe: str, count: int, provider: str):
     sym, tf = _resolve_symbol_tf(symbol, timeframe)
-    count = min(count, settings.max_bars)
-    end_ts = pd.Timestamp.now(tz="UTC")
-    start_ts, _ = window(count, tf.minutes, end_ts)
-    df = load_bars(settings, cache, sym, tf, start_ts, end_ts, count, provider)
+    df = load_bars_any(settings, cache, sym, tf, count, provider)
     return sym, tf, df
 
 
@@ -82,7 +79,7 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         return {
             "symbol": sym.canonical,
             "tv_symbol": sym.tv,
-            "provider": choose_provider(provider, settings),
+            "provider": provider if provider == SESSION_PROVIDER else choose_provider(provider, settings),
             "timeframe": tf.canonical,
             "detector": detector,
             "bars_scanned": int(len(df)),
@@ -277,7 +274,10 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
             "Level precision is bounded by it."))] = "M15",
         count: Annotated[int, Field(description=(
             "Bars to load; must cover `date` plus `adr_days` of history"), ge=50)] = 1500,
-        provider: Annotated[str, Field(description="auto | dukascopy | oanda")] = "auto",
+        provider: Annotated[str, Field(
+            description="auto | dukascopy | oanda | session (the opt-in account feed - "
+                        "the only one carrying broker CFDs like PEPPERSTONE:US500)"
+        )] = "auto",
         tz: Annotated[str, Field(description=(
             "IANA timezone the calendar day/week/month and `date` are read in"))] = "UTC",
     ) -> dict:

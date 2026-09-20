@@ -92,3 +92,52 @@ def _range_uncovered(
     last = cached["time"].iloc[-1]
     slack = pd.Timedelta(minutes=tf_minutes * 3 + 3 * 1440)  # weekend tolerance
     return first > start + slack or last < end - slack
+
+
+# --------------------------------------------------------------- any provider
+
+SESSION_PROVIDER = "session"
+
+
+def load_bars_any(
+    settings: Settings,
+    cache: BarCache,
+    symbol,
+    timeframe,
+    count: int,
+    provider: str,
+    end_ts: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Load bars from the free feeds OR the opt-in account feed.
+
+    The free providers cover forex and the instruments Dukascopy/OANDA carry;
+    broker CFDs like `PEPPERSTONE:US500` exist only on the user's own
+    TradingView feed, and that is exactly the instrument a session workflow
+    tends to run on. Tools that must reach it accept `provider="session"` and
+    come through here, so the cookie tier keeps one gate and one warning
+    instead of a copy per tool.
+
+    The account feed has no end anchor - it always returns the LAST `count`
+    bars - so a caller asking for an older window must size `count` to reach
+    back from now. The caller owns that; this function just refuses to pretend.
+    """
+    count = min(count, settings.max_bars)
+    if provider != SESSION_PROVIDER:
+        end = end_ts or pd.Timestamp.now(tz="UTC")
+        start_ts, _ = window(count, timeframe.minutes, end)
+        return load_bars(settings, cache, symbol, timeframe, start_ts, end, count, provider)
+
+    if not settings.toolset_enabled("session"):
+        raise ToolError(
+            "provider='session' needs the opt-in `session` toolset "
+            "(TV_TOOLSETS=...,session) and TV_SESSIONID - it reads through YOUR "
+            "TradingView account cookie (ToS risk). Use auto/dukascopy/oanda for "
+            "the free feeds."
+        )
+    if not settings.session_id:
+        raise ToolError("TV_SESSIONID not set; the `session` provider needs it")
+    from .session.client import SessionClient
+    from .session.warnings import warn_once
+
+    warn_once()
+    return SessionClient(settings.session_id).get_bars(symbol, timeframe, count)
