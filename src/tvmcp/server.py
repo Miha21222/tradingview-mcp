@@ -75,6 +75,10 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         from . import strategy
 
         strategy.register(mcp, settings)
+    if settings.toolset_enabled("sentinel"):
+        from . import sentinel
+
+        sentinel.register(mcp, settings)
     # Future toolset (webhook) registers here behind its flag when it lands.
     return mcp
 

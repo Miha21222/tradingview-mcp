@@ -12,7 +12,7 @@ DEFAULT_TOOLSETS = frozenset({"public", "data"})
 # better) and keeps the opt-in `session`/`desktop` tiers off (ToS-risk tiers
 # stay an explicit choice: `TV_TOOLSETS=hybrid,session,desktop`).
 HYBRID_TOOLSETS = frozenset(
-    {"data", "scan", "chart", "backtest", "pine", "journal", "strategy"}
+    {"data", "scan", "chart", "backtest", "pine", "journal", "strategy", "sentinel"}
 )
 ALL_TOOLSETS = frozenset(
     {
@@ -26,6 +26,7 @@ ALL_TOOLSETS = frozenset(
         "desktop",
         "journal",
         "strategy",
+        "sentinel",
     }
 )
 
@@ -46,6 +47,10 @@ class Settings:
     # TV_CDP_URL for the opt-in `desktop` toolset. Default 9223, NOT the
     # conventional 9222: other CDP tools commonly own 9222 and Chromium silently
     # skips binding a busy port (the app then runs with no CDP at all).
+    # TV_SENTINEL_DIR: run files for the `sentinel` toolset (one JSON per run).
+    # Defaulted (not required) so callers constructing Settings directly keep working;
+    # load_settings always passes it explicitly.
+    sentinel_dir: Path = Path.home() / ".tvmcp" / "sentinel"
     cdp_url: str = "http://127.0.0.1:9223"
     desktop_exe: str | None = None  # TV_DESKTOP_EXE: explicit TradingView.exe path for tv_desktop_launch
 
@@ -85,6 +90,9 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     strategy_dir = Path(
         e.get("TV_STRATEGY_DIR", str(Path.home() / ".tvmcp" / "strategies"))
     ).expanduser()
+    sentinel_dir = Path(
+        e.get("TV_SENTINEL_DIR", str(Path.home() / ".tvmcp" / "sentinel"))
+    ).expanduser()
     return Settings(
         toolsets=_parse_toolsets(e.get("TV_TOOLSETS", "default")),
         extra_tools=frozenset(
@@ -95,6 +103,7 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         chart_dir=chart_dir,
         journal_dir=journal_dir,
         strategy_dir=strategy_dir,
+        sentinel_dir=sentinel_dir,
         max_bars=int(e.get("TV_MAX_BARS", "5000")),
         oanda_api_key=e.get("OANDA_API_KEY") or None,
         oanda_env=e.get("OANDA_ENV", "practice"),
