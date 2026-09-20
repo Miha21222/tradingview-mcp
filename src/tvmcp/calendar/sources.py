@@ -538,14 +538,49 @@ def collect_events(start: _date, end: _date, countries: list[str] | None,
     if ff_failed:
         warnings.append("forexfactory did not answer for part of the range")
 
-    if not rows:
+    # "The first source answered" is not the same as "the answer covers what was
+    # asked". Forex Factory can return a full week and still hold nothing for the
+    # requested day or country - and an empty calendar reads as "no news today",
+    # which is the one wrong answer a calendar must never give quietly. So the
+    # usefulness of the rows is measured against the actual request before
+    # deciding whether the next source is still needed.
+    def _useful(candidate: list[dict]) -> list[dict]:
+        wanted = country_tokens(*(countries or [])) if countries else None
+        out = []
+        for e in candidate:
+            if e.get("time_utc"):
+                try:
+                    day = _date.fromisoformat(e["time_utc"][:10])
+                except ValueError:
+                    continue
+                if not _in_range(day, start, end):
+                    continue
+            if wanted and not (country_tokens(e.get("country")) & wanted):
+                continue
+            out.append(e)
+        return out
+
+    ff_useful = _useful(rows)
+    if rows and not ff_useful:
+        seen = sorted({str(e.get("country") or "?") for e in rows})[:8]
+        warnings.append(
+            "forexfactory answered but carried nothing for this day/country filter "
+            f"(codes it did carry: {', '.join(seen) or 'none'}) - trying fxstreet"
+        )
+        if "forexfactory" in sources_used:
+            sources_used.remove("forexfactory")
+
+    if not ff_useful:
         data = fetch(fxstreet_url(start, end, countries))
         if data is None:
             warnings.append("fxstreet did not answer")
         else:
-            rows = parse_fxstreet(data)
-            if rows:
+            fx_rows = parse_fxstreet(data)
+            if _useful(fx_rows):
+                rows = fx_rows
                 sources_used.append("fxstreet")
+            elif not rows:
+                rows = fx_rows
 
     degraded = not rows
     if degraded:

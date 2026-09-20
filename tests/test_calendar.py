@@ -15,6 +15,7 @@ truncation, and the argument errors that really are impossible requests.
 
 import asyncio
 import json
+from datetime import date as _date
 from datetime import date
 from pathlib import Path
 
@@ -341,3 +342,54 @@ def test_calendar_is_part_of_hybrid():
 
     assert "calendar" in HYBRID_TOOLSETS
     assert "calendar" in load_settings({"TV_TOOLSETS": "hybrid"}).toolsets
+
+
+def test_a_source_that_cannot_answer_the_filter_does_not_end_the_search(monkeypatch):
+    """An empty calendar reads as "no news today" - the one wrong answer to give quietly.
+
+    Live, Forex Factory returned a full week that held no US rows for the day
+    asked about, the search stopped there because rows had been found, and the
+    call reported zero events with no warning at all. FXStreet had thirteen.
+    """
+    from tvmcp.calendar import sources
+
+    ff_week = {"": None}  # placeholder so the fetch below is obviously keyed by url
+
+    def fetch(url):
+        if "forexfactory" in url:
+            return [{
+                "title": "Bank Holiday", "country": "JPY", "impact": "Low",
+                "date": "2026-09-17T09:00:00+00:00",
+            }]
+        return [{
+            "dateUtc": "2026-09-17T12:30:00Z", "name": "Continuing Jobless Claims",
+            "countryCode": "USD", "volatility": "MEDIUM",
+        }]
+
+    events, used, warnings, degraded = sources.collect_events(
+        _date(2026, 9, 17), _date(2026, 9, 17), ["US"], fetch, today=_date(2026, 9, 20)
+    )
+    assert [e["country"] for e in events] == ["USD"]
+    assert used == ["fxstreet"], used
+    assert any("carried nothing for this day/country filter" in w for w in warnings)
+    assert not degraded
+
+
+def test_the_us_and_usd_spellings_select_the_same_events(monkeypatch):
+    from tvmcp.calendar import sources
+
+    def fetch(url):
+        if "forexfactory" in url:
+            return None
+        return [{
+            "dateUtc": "2026-09-17T12:30:00Z", "name": "Continuing Jobless Claims",
+            "countryCode": "USD", "volatility": "MEDIUM",
+        }]
+
+    by_code = {}
+    for code in ("US", "USD"):
+        events, _, _, _ = sources.collect_events(
+            _date(2026, 9, 17), _date(2026, 9, 17), [code], fetch, today=_date(2026, 9, 20)
+        )
+        by_code[code] = [e["title"] for e in events]
+    assert by_code["US"] == by_code["USD"] == ["Continuing Jobless Claims"]
