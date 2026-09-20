@@ -1,0 +1,50 @@
+[
+  {
+    "name": "Retail Sales (MoM)",
+    "countryCode": "US",
+    "currencyCode": "USD",
+    "dateUtc": "2026-09-16T12:30:00Z",
+    "volatility": "HIGH",
+    "actual": "0.4%",
+    "consensus": "0.2%",
+    "previous": "0.1%",
+    "isAllDay": false,
+    "isSpeech": false
+  },
+  {
+    "name": "Fed Interest Rate Decision",
+    "countryCode": "US",
+    "currencyCode": "USD",
+    "dateUtc": "2026-09-16T18:00:00Z",
+    "volatility": "HIGH",
+    "actual": null,
+    "consensus": "3.75%",
+    "previous": "4.00%",
+    "isAllDay": false,
+    "isSpeech": false
+  },
+  {
+    "name": "Bank Holiday",
+    "countryCode": "JP",
+    "currencyCode": "JPY",
+    "dateUtc": "2026-09-17T00:00:00Z",
+    "volatility": "NONE",
+    "actual": null,
+    "consensus": null,
+    "previous": null,
+    "isAllDay": true,
+    "isSpeech": false
+  },
+  {
+    "name": "ECB President Lagarde speech",
+    "countryCode": "EMU",
+    "currencyCode": "EUR",
+    "dateUtc": "2026-09-18T09:00:00Z",
+    "volatility": "MEDIUM",
+    "actual": null,
+    "consensus": null,
+    "previous": null,
+    "isAllDay": false,
+    "isSpeech": true
+  }
+]

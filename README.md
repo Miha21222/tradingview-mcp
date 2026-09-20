@@ -30,7 +30,7 @@ This project is built to run **next to it**, not instead of it:
 | quotes, screener, search, news, calendars, fundamentals, alerts, watchlists | official `mcp-tradingview` |
 | deep/free OHLCV history, realtime session feed, SMC/ICT scans, chart rendering, backtests, strategies, Pine compile, journal, TradingView Desktop (CDP) | this server, `TV_TOOLSETS=hybrid` (+ `session`, `desktop` as opt-ins) |
 
-`hybrid` = `data,scan,chart,backtest,pine,journal,strategy`: it drops the `public` toolset (the official screener replaces it) and keeps `tv_setup_doctor`, which now registers regardless of toolsets. The `tradingview-hybrid` skill holds the per-job routing table and the official beta's verified limits. Users without a qualifying TradingView plan keep `TV_TOOLSETS=default,...` and ignore the official entry — the two servers are independent.
+`hybrid` = `data,scan,chart,backtest,pine,journal,strategy,calendar`: it drops the `public` toolset (the official screener replaces it) and keeps `tv_setup_doctor`, which now registers regardless of toolsets. The `tradingview-hybrid` skill holds the per-job routing table and the official beta's verified limits. Users without a qualifying TradingView plan keep `TV_TOOLSETS=default,...` and ignore the official entry — the two servers are independent.
 
 ## Quick start
 
@@ -50,7 +50,7 @@ Claude Code: the repo's `.mcp.json` registers both servers automatically when yo
 
 | Var | Default | Meaning |
 |---|---|---|
-| `TV_TOOLSETS` | `default` (= `public,data`) | Comma list; `all` enables everything; `hybrid` = `data,scan,chart,backtest,pine,journal,strategy` (pairs with the official TradingView MCP, see above). Opt-ins: `scan` (SMC scanning), `chart` (PNG rendering), `backtest`, `journal`, `pine` (compile/typecheck), `strategy` (declarative YAML specs), `session` (TV-account data, ToS risk), `desktop` (CDP to TradingView Desktop, ToS risk) |
+| `TV_TOOLSETS` | `default` (= `public,data`) | Comma list; `all` enables everything; `hybrid` = `data,scan,chart,backtest,pine,journal,strategy,calendar` (pairs with the official TradingView MCP, see above). Opt-ins: `scan` (SMC scanning + session levels), `chart` (PNG rendering), `backtest`, `journal`, `pine` (compile/typecheck), `strategy` (declarative YAML specs), `calendar` (economic events, exchange holidays, futures rollover), `session` (TV-account data, ToS risk), `desktop` (CDP to TradingView Desktop, ToS risk) |
 | `TV_READ_ONLY` | off | `1` = write-capable tools never register (wins over everything) |
 | `TV_CACHE_DIR` | `~/.tvmcp/cache` | Parquet OHLCV cache |
 | `TV_CHART_DIR` | `~/.tvmcp/charts` | Rendered PNG output (managed, collision-safe filenames) |
