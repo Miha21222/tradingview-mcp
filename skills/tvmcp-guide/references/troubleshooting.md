@@ -31,6 +31,19 @@ commands. This table covers everything else, per toolset.
 | Everything detected everywhere / nothing at all | `swing_length` mismatched to timeframe | 5–15 intraday, larger on H4/D1 (library default 50 is too coarse for M5/M15) |
 | "Unknown session" | Session name not in the allowed list | Use the exact names the error lists (note: "london close kill zone" is lowercase in the library) |
 | Results truncated | 100-result cap | Narrow `count` or the window; check `total_count` vs `returned_count` |
+| `tv_scan_levels`: "session ... has no bars" | The window genuinely has no candles (market closed, or the feed starts later) | Not an error — the tool refuses to invent a level. Check the session hours and `tz`, or raise `count` |
+| `tv_scan_levels`: "ADR: only N of M periods" / "history starts at ..." | `count` does not reach far enough back for `date` + `adr_days` | Raise `count` (M15 needs ~96 bars per day) or lower `adr_days` |
+| Session levels look an hour off | Named sessions come from the fixed-UTC table and are **not** DST-aware | Pass an explicit window instead: `{"name":"RTH","start":"09:30","end":"16:00","tz":"America/New_York"}` |
+
+## Calendar (`tv_calendar_check`)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `degraded: true`, almost no events | Both live feeds (Forex Factory, FXStreet) failed | Report the limited coverage — a date missing from `fallback_dates.json` means UNKNOWN, not "nothing scheduled". Retry later |
+| "forexfactory serves last/this/next week only" | The requested date is outside those three weeks | Expected: the tool skips FF and uses FXStreet for that range |
+| Empty `events` with a filter set | `countries` / `min_impact` too narrow | Drop `min_impact`, or pass the other spelling of the code (`US` and `USD` both match) |
+| `rollover.known: false` | The symbol is not a quarterly equity-index future (or an unlisted root) | Expected for cash/CFD symbols like `US500`; the table deliberately covers index futures only |
+| No holidays for a future year | The static table only covers the years it lists | Read the warning — it names the missing year; holidays are unknown, not absent |
 
 ## Chart (`tv_chart_render`)
 

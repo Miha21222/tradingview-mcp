@@ -26,6 +26,14 @@ is the zero-account fallback (`TV_TOOLSETS=hybrid` does not load it). Routing: t
 - `tv_ta_summary` — per-symbol TA ratings (overall/MA/oscillators + RSI + close).
 - `tv_symbol_search` — resolve a search string into exchange-qualified tickers.
 
+Not screening, but the question usually arrives with it — **"what is on today"**:
+`tv_calendar_check` (`calendar` toolset) returns the day's or week's economic
+events (filter with `countries` / `min_impact`), the exchange holidays and
+half-days, and, with `symbol`, the quarterly futures expiry and roll dates. It
+reports facts and passes no verdict on whether a day is tradeable; if it comes
+back `degraded: true` both live feeds were down and only a small bundled table
+answered, so say the coverage is limited rather than "nothing scheduled".
+
 ## Workflow
 
 1. **Resolve symbols**: `tv_symbol_search("eurusd")` → `OANDA:EURUSD` (or

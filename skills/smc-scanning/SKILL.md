@@ -28,8 +28,16 @@ Front these first (all read-only, all name their data feed via `provider`):
 - `tv_scan_liquidity` — clustered swing highs/lows + sweeps.
 - `tv_scan_sessions` — killzone blocks with each block's high/low (dealing range).
 - `tv_scan_prev_hl` — previous-day/week high/low and whether price broke them.
+- `tv_scan_levels` — the whole pre-open level set in one call, for any symbol and
+  any session definition: previous day/week/month levels, each named session's
+  high/low/open/close, "midnight open" anchors, ADR(n) with projections, the
+  opening range / initial balance with extensions, and the session gap.
+- `tv_scan_check_levels` — has price tagged a level or zone since a given time
+  (first touch, which side it came from, closest approach when it has not).
 
 Optional: `tv_chart_render` to draw the detected structures (see the chart-markup skill).
+For "is the exchange even open today / what is on the calendar", use
+`tv_calendar_check` (`calendar` toolset).
 
 ## Workflow
 
@@ -45,7 +53,9 @@ Optional: `tv_chart_render` to draw the detected structures (see the chart-marku
 5. **Session filter**: `tv_scan_sessions(symbol, timeframe, count, session=...)` —
    note each killzone block's high/low (the dealing range where liquidity sits).
 6. **Previous H/L**: `tv_scan_prev_hl` — levels traders watch; a sweep of the
-   previous day high/low is a common stop-hunt.
+   previous day high/low is a common stop-hunt. For a full pre-open map (ADR,
+   opening range, gap, session levels) call `tv_scan_levels` once instead, and
+   pass the levels you care about to `tv_scan_check_levels` later in the day.
 7. **Synthesize a narrative**, naming each detected element with its timestamp and
    price, then (optionally) render it: build a `markup_json` and call
    `tv_chart_render` (see chart-markup skill).

@@ -23,7 +23,7 @@
     "TV_TOOLSETS": {
       "type": "string",
       "title": "Enabled toolsets",
-      "description": "Comma list. Default `hybrid` = data,scan,chart,backtest,pine,journal,strategy (everything the official TradingView MCP does not do). `default` = public,data (unauth screener, no official server needed); `all` = everything. session/desktop are opt-in and carry ToS risk: `hybrid,session,desktop`.",
+      "description": "Comma list. Default `hybrid` = data,scan,chart,backtest,pine,journal,strategy,calendar (everything the official TradingView MCP does not do, plus a calendar that also carries exchange holidays and futures rollover). `default` = public,data (unauth screener, no official server needed); `all` = everything. session/desktop are opt-in and carry ToS risk: `hybrid,session,desktop`.",
       "default": "hybrid"
     },
     "TV_READ_ONLY": {

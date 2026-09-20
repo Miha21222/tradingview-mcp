@@ -25,7 +25,8 @@ always.
 | core (always) | `tv_setup_doctor` | nothing | none |
 | `public` (default) | `tv_screener_run`, `tv_ta_summary`, `tv_symbol_search` | nothing | none (no account) |
 | `data` (default) | `tv_data_get_bars`, `tv_data_providers_status` | Node for Dukascopy; OANDA key optional | none (not TV data) |
-| `scan` | `tv_scan_fvg/ob/structure/liquidity/sessions/prev_hl`, `tv_scan_check_levels` | bars available | none |
+| `scan` | `tv_scan_fvg/ob/structure/liquidity/sessions/prev_hl`, `tv_scan_levels`, `tv_scan_check_levels` | bars available | none |
+| `calendar` | `tv_calendar_check` | network (degrades to a bundled static table) | none |
 | `chart` | `tv_chart_render` | `playwright install chromium` | none (own engine) |
 | `backtest` | `tv_backtest_run` | bars | none |
 | `strategy` | `tv_strategy_list/run` | YAML specs in strategy dir | none |
@@ -35,8 +36,10 @@ always.
 | `desktop` | 35 desktop tools: `tv_desktop_launch`, `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor, `tv_desktop_ui_find_element/ui_click`, `tv_desktop_check_levels`, `tv_desktop_workspace_prepare`, `tv_desktop_pine_build_and_backtest`, `pine_find_exact/replace_exact/save_as/get_errors` | app running with CDP (`tv_desktop_launch` starts it) | **yes — user's account** |
 
 Enable via `TV_TOOLSETS` env (comma list; `default` = public+data; `all` = everything;
-`hybrid` = data+scan+chart+backtest+pine+journal+strategy — the surface the official
-TradingView MCP does not cover, used when both servers run side by side).
+`hybrid` = data+scan+chart+backtest+pine+journal+strategy+calendar — the surface the
+official TradingView MCP does not cover, used when both servers run side by side;
+`calendar` stays in it because ours also carries exchange holidays, half-days and
+futures rollover).
 `TV_READ_ONLY=1` strips every workspace-mutating tool regardless of toolsets.
 For `session`/`desktop` details, load the `tradingview-tiers` skill; for the
 two-server split (quotes/news/calendar/alerts/watchlists on the official server),
@@ -61,6 +64,15 @@ load `tradingview-hybrid`.
 - "Get me price history" → `tv_data_get_bars` (free feeds). TV-chart-parity candles
   specifically → `tv_session_ohlcv` (opt-in, cookie).
 - "Find setups / structure / liquidity" → the scan tools (`tv_scan_fvg`, `tv_scan_ob`, `tv_scan_structure`, `tv_scan_liquidity`, `tv_scan_sessions`, `tv_scan_prev_hl`), then `tv_chart_render` to show it.
+- "What levels do I mark before the open" (previous day/week/month, session
+  high/low/open/close, midnight open, ADR and its projections, the opening
+  range / initial balance with extensions, the overnight gap) → `tv_scan_levels`,
+  then `tv_scan_check_levels` later to ask whether price tagged any of them.
+  It returns facts only — which of those levels matter is your judgment.
+- "What's on the calendar / is the market open today / when does ES roll" →
+  `tv_calendar_check` (`countries`, `min_impact`, `week`, `symbol`). If it
+  answers `degraded: true`, both live feeds were down and you are looking at a
+  small static table: say the coverage is limited rather than "nothing today".
 - "Does this idea make money" → `tv_backtest_run`; reusable parameterization → a YAML
   spec + `tv_strategy_run`.
 - "Check my Pine script" → `tv_pine_compile` in a write-compile-fix loop.

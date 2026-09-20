@@ -17,12 +17,15 @@ the desktop app**. Nothing is bridged in code: pick the right server per call.
 | Latest quote, % change, volume for a listed symbol | official `get_symbol_data` / `get_symbol_data_batch` | account-grade screener columns, one call |
 | Rank / filter a market (RSI, ADX, change, fundamentals) | official `run_screener` (+ `get_screener_columns`) | same engine as `tv_screener_run`, maintained by TradingView |
 | Resolve a ticker / company name | official `search_symbols`; fall back to `tv_symbol_search` for CFD-broker feeds | official search misses broker CFDs (see limits) |
-| News headlines, economic calendar, earnings/dividends, macro series, fundamentals, filings, forecasts | official only | this server has no research surface |
+| News headlines, earnings/dividends, macro series, fundamentals, filings, forecasts | official only | this server has no research surface |
+| Economic events for a day or week | either: official `get_economic_calendar` for depth (history since 2003, ~31 days forward); `tv_calendar_check` when holidays/rollover belong in the same answer or the official server is not registered | ours adds exchange holidays, half-days and futures rollover, and degrades to a static table instead of failing |
+| Is the exchange closed or on a half-day, when does this futures contract roll | `tv_calendar_check` (pass `symbol` for rollover) | the official calendar carries neither |
 | Price alerts (create/list/update/delete), watchlists (CRUD) | official only | this server never writes to a TradingView account |
 | Daily/weekly bars for bias, quick context | either; official `get_ohlcv` is simplest | both fine; official is delayed 15+ min |
 | Intraday bars older than ~3 sessions at 1m, any bar-exact replay | `tv_data_get_bars` (Dukascopy/OANDA, cached) | official has no `end_time`/paging: max 5000 bars back from now |
 | Bars as the TradingView chart shows them, realtime feed (CFD, broker symbols) | `tv_session_ohlcv` / `tv_session_realtime` (opt-in cookie) | official bars are delayed and not tick-live |
 | SMC/ICT detection (FVG, OB, structure, liquidity, sessions, prev H/L) | `tv_scan_fvg`, `tv_scan_ob`, `tv_scan_structure`, `tv_scan_liquidity`, `tv_scan_sessions`, `tv_scan_prev_hl` | official has no pattern tools |
+| Pre-open level set: prev day/week/month, session H/L/O/C, ADR + projections, opening range + extensions, gaps | `tv_scan_levels` | official has no level computation |
 | Chart images with markup, backtest trade renders | `tv_chart_render`, `tv_backtest_render_trades` | official has no charting |
 | Backtests, declarative strategies, Pine compile, FX Replay journal | `tv_backtest_run`, `tv_strategy_list` / `tv_strategy_run`, `tv_pine_compile`, `tv_journal_scan` / `tv_journal_parse` | official has none of these |
 | Read the user's own indicators / draw on the live chart / screenshots of the real app | `tv_desktop_screenshot`, `tv_desktop_list_studies`, `tv_desktop_read_study_plots`, `tv_desktop_draw` and siblings (opt-in CDP) | official has no desktop access |
