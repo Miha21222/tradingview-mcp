@@ -10,7 +10,9 @@ Notes on behaviour:
 - Swing-based detectors (ob, structure, liquidity) classify a swing using future
   candles, so the trailing `swing_length` bars repaint; every such result carries a
   `repaint_note` telling the caller to treat those as unconfirmed.
-- Session windows are fixed UTC hours (not DST-aware) per the pinned library.
+- Session windows are fixed UTC hours (not DST-aware) per the pinned library;
+  `tv_scan_levels` additionally accepts explicit `{name,start,end,tz}` windows in
+  any IANA zone, which ARE DST-correct.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from ..config import Settings
 from ..symbols import resolve, resolve_timeframe
 from . import detectors
 from . import levels as levels_mod
+from . import session_levels as session_levels_mod
 
 _MAX_RESULTS = 100
 
@@ -232,4 +235,94 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         sym, tf, df = load(symbol, timeframe, count, provider)
         out = _base(sym, tf, df, provider, "prev_hl", {"time_frame": time_frame})
         out.update(detectors.scan_prev_hl(df, time_frame=time_frame))
+        return out
+
+    @mcp.tool(tags={"scan"}, annotations={"readOnlyHint": True, "openWorldHint": True})
+    def tv_scan_levels(
+        symbol: Annotated[str, Field(description="Any alias: EURUSD, OANDA:EURUSD, ES1!, US500")],
+        date: Annotated[str, Field(description=(
+            "Session date YYYY-MM-DD in `tz`; empty = the date of the last loaded bar. "
+            "A past date needs a `count` large enough to reach it."))] = "",
+        sessions: Annotated[list, Field(description=(
+            "Session windows to measure. Either names from the fixed-UTC table "
+            "(Sydney, Tokyo, London, New York, Asian kill zone, London open kill zone, "
+            "New York kill zone, london close kill zone - NOT DST-aware) or explicit "
+            "objects {name, start: 'HH:MM', end: 'HH:MM', tz: IANA, day_offset: int}, "
+            "which ARE DST-correct. A session is labelled by the date it starts on; "
+            "end <= start wraps past midnight. Max 8."))] = [],
+        include: Annotated[list, Field(description=(
+            "Which blocks to compute: prev_day, prev_week, prev_month, sessions, "
+            "anchors, adr, opening_range, gaps (or ['all']). Empty = all."))] = [],
+        anchors: Annotated[list, Field(description=(
+            "'Midnight open' style anchors: [{name, time: 'HH:MM', tz: IANA, "
+            "day_offset}]. Each yields the OPEN of the first bar at or after that "
+            "instant. Max 8."))] = [],
+        adr_days: Annotated[int, Field(description="Periods averaged for ADR", ge=1, le=60)] = 5,
+        adr_session: Annotated[str, Field(description=(
+            "Measure ADR over this session's range instead of the calendar day; must "
+            "name one of `sessions`. Empty = calendar day in `tz`."))] = "",
+        adr_anchor: Annotated[str, Field(description=(
+            "Price the ADR projections extend from: auto (first session open -> "
+            "previous day close -> last close), session_open, prev_day_close, "
+            "last_close, none, or a number."))] = "auto",
+        adr_multiples: Annotated[list, Field(description="ADR projection multiples; empty = [0.5, 1]")] = [],
+        opening_range_session: Annotated[str, Field(description=(
+            "Which of `sessions` the opening range opens; empty = the first one."))] = "",
+        opening_range_minutes: Annotated[int, Field(description=(
+            "Length of the opening range / initial balance in minutes"), ge=1, le=1440)] = 60,
+        extensions: Annotated[list, Field(description=(
+            "Opening-range extension multiples; empty = [0.5, 1, 1.5, 2]"))] = [],
+        timeframe: Annotated[str, Field(description=(
+            "Bar timeframe the levels are measured on: M1, M5, M15, M30, H1, H4, D1. "
+            "Level precision is bounded by it."))] = "M15",
+        count: Annotated[int, Field(description=(
+            "Bars to load; must cover `date` plus `adr_days` of history"), ge=50)] = 1500,
+        provider: Annotated[str, Field(description="auto | dukascopy | oanda")] = "auto",
+        tz: Annotated[str, Field(description=(
+            "IANA timezone the calendar day/week/month and `date` are read in"))] = "UTC",
+    ) -> dict:
+        """Pre-open level set for ANY symbol and ANY session definition (facts, not a plan).
+
+        Computes, in one call: previous day high/low/close, previous week and
+        month high/low, each named session's high/low/open/close, "midnight
+        open" style anchors, ADR(n) with projections from a chosen anchor, an
+        opening-range / initial-balance block (size, size as a share of ADR,
+        extensions at configurable multiples above and below), and the gap
+        between consecutive occurrences of a session.
+
+        Every level names how it was derived in `source`. Nothing is classified
+        as good, wide, narrow or tradeable and no day plan is implied - that is
+        the caller's judgment. A requested session with no bars in the loaded
+        window produces a `warnings` entry, never an invented level.
+
+        Levels are feed-specific: the result names its `provider`. Sessions from
+        the fixed-UTC name table are not DST-aware; explicit windows with a `tz`
+        are. Use `tv_scan_check_levels` afterwards to ask whether price has since
+        tagged any of these.
+        """
+        sym, tf, df = load(symbol, timeframe, count, provider)
+        out = _base(sym, tf, df, provider, "levels", {
+            "date": date or None,
+            "sessions": sessions or None,
+            "adr_days": adr_days,
+            "adr_session": adr_session or None,
+            "opening_range_minutes": opening_range_minutes,
+            "tz": tz,
+        })
+        out.update(session_levels_mod.compute_levels(
+            df,
+            day=date or None,
+            sessions=list(sessions) or None,
+            include=list(include) or None,
+            anchors=list(anchors) or None,
+            adr_days=adr_days,
+            adr_session=adr_session,
+            adr_anchor=adr_anchor,
+            adr_multiples=list(adr_multiples) or None,
+            opening_range_session=opening_range_session,
+            opening_range_minutes=opening_range_minutes,
+            extensions=list(extensions) or None,
+            tz=tz,
+            timeframe_minutes=tf.minutes,
+        ))
         return out
