@@ -566,3 +566,64 @@ def test_utc_only_timestamps():
     for e in events:
         assert e["ts_utc"].endswith("Z")
         assert pd.Timestamp(e["ts_utc"]).tzinfo == timezone.utc
+
+
+class _AnchorlessFeed(_Feed):
+    """A feed with no end anchor: it always returns the LAST `count` bars.
+
+    This is the account-cookie path (SessionClient.get_bars(symbol, tf, count)),
+    which is what a replay of an older day actually talks to.
+    """
+
+    def __call__(self, symbol, timeframe, count, provider, end):
+        self.calls.append({"symbol": symbol, "timeframe": timeframe, "count": count,
+                           "provider": provider, "end": end})
+        sym, tf = resolve(symbol), resolve_timeframe(timeframe)
+        return sym, tf, self.df.tail(count).reset_index(drop=True)
+
+
+def test_replay_of_an_older_window_reaches_back_on_an_anchorless_feed(tmp_path):
+    """Sizing the request by the replay window returns today's bars, not the day asked for.
+
+    Live on the owner's account feed this showed up as NO_DATA for a replay of a
+    session ten days back: the window is three hours wide, so the run asked for
+    ~56 bars, got the newest 56, and the window filter dropped every one. The
+    count must span from the replay start to now whenever the feed cannot be
+    anchored to an end.
+    """
+    # The session under test sits at the START of the frame; "now" is far later,
+    # with a long tail of newer bars in front of it.
+    tail = SESSION_DF.copy()
+    tail["time"] = tail["time"] + pd.Timedelta(days=7)
+    df = pd.concat([SESSION_DF, tail], ignore_index=True)
+
+    feed = _AnchorlessFeed(df=df)
+    mcp, _ = _build(tmp_path, feed=feed)
+    spec = _spec()
+    spec["provider"] = "session"
+    replay = {"from": str(SESSION_DF["time"].iloc[0]), "to": str(SESSION_DF["time"].iloc[-1])}
+    _call(mcp, "tv_sentinel_start", {"spec": spec, "run_id": "older", "replay": replay})
+    out = _call(mcp, "tv_sentinel_poll", {"run_id": "older", "since_seq": 0, "max_events": 200})
+
+    assert feed.calls, "the loader was never called"
+    # Asked for enough bars to reach back over the week-long gap, not just the window.
+    assert feed.calls[-1]["count"] > len(SESSION_DF)
+    assert "NO_DATA" not in _types(out["events"])
+    assert "RANGE_CLOSED" in _types(out["events"])
+
+
+def test_history_too_short_says_so_instead_of_a_bare_no_data(tmp_path):
+    """A feed whose history starts after the window is a different problem from a dead feed."""
+    late = SESSION_DF.copy()
+    late["time"] = late["time"] + pd.Timedelta(days=30)
+    feed = _AnchorlessFeed(df=late)
+    mcp, _ = _build(tmp_path, feed=feed)
+    spec = _spec()
+    spec["provider"] = "session"
+    replay = {"from": str(SESSION_DF["time"].iloc[0]), "to": str(SESSION_DF["time"].iloc[-1])}
+    _call(mcp, "tv_sentinel_start", {"spec": spec, "run_id": "short", "replay": replay})
+    out = _call(mcp, "tv_sentinel_poll", {"run_id": "short", "since_seq": 0, "max_events": 50})
+
+    assert any("history starts at" in w for w in out["warnings"]), out["warnings"]
+    no_data = [e for e in out["events"] if e["type"] == "NO_DATA"]
+    assert no_data and "history starts at" in no_data[0]["payload"]["reason"]

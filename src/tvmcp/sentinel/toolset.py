@@ -168,8 +168,15 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
             start, end = max(start, r_from), r_to
         return start, end
 
-    def _bar_count(start: pd.Timestamp, end: pd.Timestamp, tf_minutes: int) -> int:
-        span = max((end - start).total_seconds() / 60.0, tf_minutes)
+    def _bar_count(start: pd.Timestamp, end: pd.Timestamp, tf_minutes: int,
+                   anchored: bool, now: pd.Timestamp) -> int:
+        # The account-cookie feed has no end anchor: it always returns the LAST
+        # `count` bars. A replay of an older day must therefore ask for enough
+        # bars to reach back from NOW to the replay start - sizing by the width
+        # of the replay window returns today's bars, which the window filter
+        # then drops, and the run reports NO_DATA on perfectly good history.
+        reach_to = end if anchored else max(end, now)
+        span = max((reach_to - start).total_seconds() / 60.0, tf_minutes)
         return int(min(settings.max_bars, max(50, math.ceil(span / tf_minutes) + _PAD_BARS)))
 
     def _advance(doc: dict, spec: SentinelSpec, now: pd.Timestamp) -> tuple[list[dict], list[str]]:
@@ -177,7 +184,8 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         tf = _resolve(spec)[1]
         start, end = _feed_window(doc)
         horizon = end if end is not None else now
-        count = _bar_count(start, horizon, tf.minutes)
+        anchored = spec.provider != "session"
+        count = _bar_count(start, horizon, tf.minutes, anchored, now)
         df = None
         reason = None
         try:
@@ -188,9 +196,20 @@ def register(mcp: Any, settings: Settings, loader: Callable | None = None) -> No
         if df is not None and len(df):
             d = df.copy()
             d["time"] = pd.to_datetime(d["time"], utc=True)
+            earliest = d["time"].min()
             d = d[d["time"] >= start]
             if end is not None:
                 d = d[d["time"] <= end]
+            if not len(d) and earliest > start:
+                # Say which side of the gap we are on: an empty window because
+                # the feed's history is too short is a different problem from a
+                # feed that is down, and only one of them is worth retrying.
+                reason = (
+                    f"the feed's {spec.timeframe} history starts at {iso(earliest)}, "
+                    f"after this run's window begins ({iso(start)}); "
+                    f"asked for {count} bars (cap TV_MAX_BARS={settings.max_bars})"
+                )
+                warnings.append(reason)
             df = d
         events = machine.advance(
             spec, doc["state"], df,
