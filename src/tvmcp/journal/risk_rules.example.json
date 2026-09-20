@@ -48,9 +48,9 @@
     },
     "max_losses_per_day": {
       "enabled": true,
-      "max": 1,
+      "max": 0,
       "status": "stop",
-      "_": "The 'one stop per day' rule: max 1 losing trade, breach on the second."
+      "_": "`max` is the largest count STILL ALLOWED - a ceiling, not the rule's name. 'I allow myself one stop a day', meaning the day ends when that stop happens, is max 0: the check breaches as soon as one losing trade exists. max 1 permits that first loss and only breaches on a second, which is the opposite of what the trader meant. The same trap sits on every count limit here."
     },
     "max_trades_per_week": {
       "enabled": true,
