@@ -134,11 +134,19 @@ def test_falls_back_to_fxstreet_when_forex_factory_is_down(tmp_path):
     assert any("fxstreet" in u for u in f.urls)
 
 
-def test_forex_factory_is_skipped_without_a_request_outside_its_three_weeks(tmp_path):
+def test_forex_factory_is_skipped_without_a_request_outside_the_week_it_publishes(tmp_path):
+    """A dead endpoint must not be requested on every call - it bought a warning that read like a broken feed."""
     f = FakeFetcher()
     data = _call(_build(tmp_path, f), {"date": "2026-10-20"})  # 5 weeks out
     assert not any("faireconomy" in u for u in f.urls)
-    assert any("last/this/next week only" in w for w in data["warnings"])
+    assert any("current week only" in w for w in data["warnings"])
+    assert any("fxstreet" in u for u in f.urls)
+
+
+def test_last_week_is_served_by_fxstreet_without_a_dead_request(tmp_path):
+    f = FakeFetcher()
+    _call(_build(tmp_path, f), {"date": "2026-09-09"})  # today in the fixture is 2026-09-16
+    assert not any("lastweek" in u for u in f.urls)
     assert any("fxstreet" in u for u in f.urls)
 
 
@@ -290,13 +298,15 @@ def test_empty_date_uses_the_injected_today(tmp_path):
 # --------------------------------------------------------------------------- #
 # pure helpers
 # --------------------------------------------------------------------------- #
-def test_ff_slot_picks_the_right_weekly_feed():
+def test_ff_slot_offers_only_the_week_forex_factory_publishes():
+    """Verified 2026-09-20: the lastweek/nextweek files 404; only thisweek exists."""
     today = date(2026, 9, 16)
     assert sources.ff_slot(date(2026, 9, 14), today) == "thisweek"
     assert sources.ff_slot(date(2026, 9, 20), today) == "thisweek"
-    assert sources.ff_slot(date(2026, 9, 21), today) == "nextweek"
-    assert sources.ff_slot(date(2026, 9, 13), today) == "lastweek"
+    assert sources.ff_slot(date(2026, 9, 21), today) is None   # next week is not published
+    assert sources.ff_slot(date(2026, 9, 13), today) is None   # nor is last week
     assert sources.ff_slot(date(2026, 10, 20), today) is None
+    assert set(sources.FF_URLS) == {"thisweek"}
 
 
 def test_third_friday():

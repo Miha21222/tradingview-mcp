@@ -34,9 +34,16 @@ from pathlib import Path
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
+# Forex Factory publishes ONE weekly file. The lastweek/nextweek names are the
+# obvious guess and they 404 (verified 2026-09-20), so asking for them on every
+# call bought two dead requests and a warning that read like a broken feed.
+# They stay in the table, unused by default, so a future publication is a
+# one-line change rather than a rediscovery.
 FF_URLS = {
-    "lastweek": "https://nfs.faireconomy.media/ff_calendar_lastweek.json",
     "thisweek": "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+}
+FF_UNPUBLISHED = {
+    "lastweek": "https://nfs.faireconomy.media/ff_calendar_lastweek.json",
     "nextweek": "https://nfs.faireconomy.media/ff_calendar_nextweek.json",
 }
 FXSTREET_BASE = "https://calendar-api.fxstreet.com/en/api/v1/eventDates"
@@ -201,11 +208,19 @@ def _event(time_utc, time_raw, country, title, impact, actual, forecast,
 # Forex Factory
 # --------------------------------------------------------------------------- #
 def ff_slot(target: _date, today: _date) -> str | None:
-    """Which weekly FF feed covers `target`, or None when none of them does."""
+    """Which weekly FF feed covers `target`, or None when none of them does.
+
+    The week here is Monday-based while the published file appears to run
+    Sunday to Saturday (observed 2026-09-20, a Sunday: the file's first row was
+    that same day). So a date early in our week can be absent from the file we
+    think covers it - which is exactly why `collect_events` measures whether a
+    source actually answered the request before deciding it is done.
+    """
     this_monday = today - timedelta(days=today.weekday())
     target_monday = target - timedelta(days=target.weekday())
     delta_weeks = (target_monday - this_monday).days // 7
-    return {-1: "lastweek", 0: "thisweek", 1: "nextweek"}.get(delta_weeks)
+    slot = {-1: "lastweek", 0: "thisweek", 1: "nextweek"}.get(delta_weeks)
+    return slot if slot in FF_URLS else None
 
 
 def parse_ff(rows) -> list[dict]:
@@ -522,8 +537,8 @@ def collect_events(start: _date, end: _date, countries: list[str] | None,
             slots.append(slot)
     if len(slots) * 7 < (end - start).days + 1 or not slots:
         warnings.append(
-            "forexfactory serves last/this/next week only - the requested range is "
-            "not fully covered by it"
+            "forexfactory publishes the current week only - the rest of this range "
+            "comes from fxstreet"
         )
     rows: list[dict] = []
     ff_failed = False
