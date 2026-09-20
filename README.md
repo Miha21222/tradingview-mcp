@@ -54,7 +54,7 @@ Claude Code: the repo's `.mcp.json` registers both servers automatically when yo
 | `TV_READ_ONLY` | off | `1` = write-capable tools never register (wins over everything) |
 | `TV_CACHE_DIR` | `~/.tvmcp/cache` | Parquet OHLCV cache |
 | `TV_CHART_DIR` | `~/.tvmcp/charts` | Rendered PNG output (managed, collision-safe filenames) |
-| `TV_JOURNAL_DIR` | `~/.tvmcp/journal` | FX Replay CSV watch-folder for `tv_journal_scan` / `tv_journal_parse` |
+| `TV_JOURNAL_DIR` | `~/.tvmcp/journal` | journal watch-folder for `tv_journal_scan` / `tv_journal_parse` / `tv_journal_load` (`tv_risk_guard` also takes a full path) |
 | `TV_STRATEGY_DIR` | `~/.tvmcp/strategies` | YAML strategy specs for `tv_strategy_list` / `tv_strategy_run` |
 | `TV_SESSIONID` | — | Your TradingView `sessionid` cookie gates the opt-in `session` toolset (ToS risk; see below). Live fetch works: the cookie is exchanged for a websocket JWT and fed to tvdatafeed-enhanced |
 | `TV_CDP_URL` | `http://127.0.0.1:9223` | CDP address of TradingView Desktop for the opt-in `desktop` toolset (start the app with `tv_desktop_launch` or `scripts/start-tv-desktop.ps1`; port **9223** on purpose — another CDP app usually owns 9222 and Chromium skips a busy port silently) |

@@ -1,28 +1,63 @@
 ---
 name: journal-sync
-description: "Import FX Replay CSV exports into a Notion trade journal using the documented FX Replay mapping (side, weekday, session, pair). Use when ingesting a backtest/analytics export, de-duplicating re-imports, or syncing trades. Triggers: import FX Replay, sync journal, push trades to Notion, backtest-analytics, map the CSV."
+description: "Load a trade journal of any shape (FX Replay export, your own session CSV, a broker export) into one normalized record schema, and import FX Replay exports into a Notion trade journal using the documented mapping. Use when reading a journal, computing journal stats, ingesting a backtest/analytics export, de-duplicating re-imports, or syncing trades. Triggers: load my journal, read my trades, journal stats, import FX Replay, sync journal, push trades to Notion, map the CSV."
 ---
 
-# Journal sync: FX Replay CSV → Notion
+# Journal sync: load any journal, then push to Notion
 
-Import FX Replay CSV exports into a Notion trade journal using the **documented
-mapping** (empirically verified, not guessed). Parse + normalize the CSV with the
-journal tools here, then write through your own **Notion MCP**.
+Two jobs. **Loading** a journal into one normalized record schema
+(`tv_journal_load`) — that is where "load my journal", "what is in my journal",
+"what are my stats" go. **Importing** an FX Replay export into a Notion trade
+journal using the **documented mapping** (empirically verified, not guessed) —
+normalize with the journal tools, write through your own **Notion MCP**.
 
 ## When to use
 
+- "Load my journal", "read my trades", "what do my stats say" → `tv_journal_load`.
 - A new `backtesting-analytics.csv` (or similar FX Replay export) needs to land in
-  the backtest journal.
+  the backtest journal → the import procedure below.
 - Re-importing / de-duplicating a previously imported export.
 - Checking whether an import is consistent (audit via the raw-code columns).
+- "Am I allowed to trade today?" is **not** this skill — that is `risk-sizing` →
+  `tv_risk_guard`, which reads the same records.
 
 ## Tools
 
+- `tv_journal_load` — **any** journal shape → canonical records + stats + problems.
 - `tv_journal_scan` — list CSV files in the journal watch-folder and sniff them.
-- `tv_journal_parse` — normalize one export into records + summary (side/day/session/
-  tags mapping, symbols resolved, R computed).
+- `tv_journal_parse` — the FX Replay-specific normalizer (vault keys: side/day/
+  session/tags, symbols resolved, R computed). Use it when you want those keys;
+  `tv_journal_load` returns the same rows in the canonical schema.
 - Your **Notion MCP** (`notion-create-pages`, `notion-update-data-source`,
   `notion-query-data-sources`, ...) — the write side (external, out of scope here).
+
+## Loading a journal of any shape
+
+`tv_journal_load(path_or_name, source=None, mapping=None, currency=None,
+risk_per_r=None, utc_offset_hours=0, limit=100)`
+
+- `path_or_name`: a bare file name resolves inside the journal watch-folder; a path
+  with a separator is used as given (journals usually live in a vault, not the
+  watch-folder). `.csv` / `.tsv` / `.txt` / `.json`.
+- Delimiter and columns are sniffed. Three shapes are handled: an FX Replay export
+  (auto-detected), your own session CSV (an `entered` yes/no column and a result in
+  R), and broker exports (any column names, decimal commas, MetaTrader timestamps).
+  Pass `mapping={"pnl": "Net P/L", "date": "Session"}` for anything odd.
+- **Every record**: `id, date` (session date), `opened_at, closed_at, symbol, side,
+  entry, exit, size, size_unit, r_multiple, pnl, pnl_currency, fees, strategy,
+  tags[], source, raw_ref, derived[]`. Timestamps are UTC.
+- `r_multiple` and `pnl` may each be missing. One is derived from the other **only**
+  when the file carries a risk/stop column or you pass `risk_per_r` (what 1R is
+  worth), and the derivation is then named in `derived[]`. Nothing is invented —
+  and do not fill a gap by hand either; say the number is missing.
+- **Read `problems[]` before quoting any number.** A row that could not be parsed is
+  listed there with its row number and reason, and `fail_closed: true` means the
+  stats cover an incomplete journal. Fix the row, re-run; never present a reassuring
+  average from a broken file. `skipped[]` is different — those rows are correctly
+  recorded non-events (`entered: no`, a still-open position).
+- Stats report R and currency **separately** (`expectancy_r` vs
+  `expectancy_currency`, `profit_factor_r` vs `profit_factor`). Never average the two
+  into one number.
 
 ## FX Replay CSV columns (genuine export)
 

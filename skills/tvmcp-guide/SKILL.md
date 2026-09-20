@@ -29,7 +29,7 @@ always.
 | `chart` | `tv_chart_render` | `playwright install chromium` | none (own engine) |
 | `backtest` | `tv_backtest_run` | bars | none |
 | `strategy` | `tv_strategy_list/run` | YAML specs in strategy dir | none |
-| `journal` | `tv_journal_scan/parse` | FX Replay CSV exports | none |
+| `journal` | `tv_journal_scan/parse/load`, `tv_risk_guard` | CSV/JSON journals (any shape) + your rules config | none |
 | `pine` | `tv_pine_compile` | network | low (undocumented endpoint) |
 | `session` | `tv_session_status/ohlcv/realtime` | `TV_SESSIONID` cookie | **yes — user's account** |
 | `desktop` | 35 desktop tools: `tv_desktop_launch`, `tv_desktop_status/screenshot`, symbol/timeframe/viewport, drawings, studies read + set inputs, `tv_desktop_read_strategy`, replay, Pine Editor, `tv_desktop_ui_find_element/ui_click`, `tv_desktop_check_levels`, `tv_desktop_workspace_prepare`, `tv_desktop_pine_build_and_backtest`, `pine_find_exact/replace_exact/save_as/get_errors` | app running with CDP (`tv_desktop_launch` starts it) | **yes — user's account** |
@@ -64,7 +64,9 @@ load `tradingview-hybrid`.
 - "Does this idea make money" → `tv_backtest_run`; reusable parameterization → a YAML
   spec + `tv_strategy_run`.
 - "Check my Pine script" → `tv_pine_compile` in a write-compile-fix loop.
-- "What did I trade" → `tv_journal_scan` → `tv_journal_parse`.
+- "What did I trade" / "load my journal" → `tv_journal_scan` → `tv_journal_load`
+  (any shape) or `tv_journal_parse` (FX Replay vault keys).
+- "Am I allowed to trade today" → `tv_risk_guard` with your own rules config.
 - "Show/drive my actual TradingView" → the desktop tools (opt-in): `tv_desktop_status`,
   `tv_desktop_screenshot`, `tv_desktop_set_symbol`/`set_timeframe`/`scroll_to_date`;
   "what does my indicator show" → `tv_desktop_list_studies` + `read_study_*`;
