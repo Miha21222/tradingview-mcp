@@ -1,0 +1,99 @@
+{
+  "_": "EXAMPLE rules for tv_risk_guard. Generic placeholders - copy this file, put YOUR limits in it and pass it as rules_path (or the object as `rules`). tvmcp ships no thresholds of its own; these numbers are a starting shape, not advice.",
+  "version": 1,
+
+  "_units": "Loss limits and buffers name their unit: {'pct': x} = percent of the account, {'currency': x} = account currency, {'r': x} = R-multiples. Always a positive size. A loss that REACHES the limit exactly breaches it; one tick under does not. Count limits use 'max' = the largest allowed count (breach when count > max).",
+
+  "percent_base": "starting_balance",
+  "_percent_base": "What 100 % refers to: 'starting_balance' (prop-style, the limit does not shrink as you lose) or 'balance'. Falls back to whichever the account block actually carries.",
+
+  "risk_per_r": {
+    "pct_of_account": 1.0,
+    "_": "How much 1R is worth, so R journals and money journals can be compared against the same limits. Use 'currency': 250 instead to state it as an amount. Set to null and R<->money conversion is refused rather than guessed - a check that needs it then reports 'unknown', never 'ok'."
+  },
+
+  "session": {
+    "trading_days": [0, 1, 2, 3, 4],
+    "week_start": "monday",
+    "session_calendar": "weekdays",
+    "_": "trading_days: Mon=0 ... Sun=6. session_calendar 'weekdays' counts a session per trading weekday; 'journal' counts only dates that appear in the journal (use it when you trade an irregular schedule)."
+  },
+
+  "checks": {
+    "daily_loss": {
+      "enabled": true,
+      "limit": {"pct": 2.0},
+      "status": "stop",
+      "_": "Realized result for today's session."
+    },
+    "weekly_loss": {
+      "enabled": true,
+      "limit": {"pct": 3.0},
+      "window": "calendar",
+      "rolling_days": 7,
+      "status": "stop",
+      "_": "window 'calendar' = the current week from week_start; 'rolling' = the last rolling_days days including today."
+    },
+    "monthly_loss": {
+      "enabled": true,
+      "limit": {"pct": 6.0},
+      "window": "calendar",
+      "rolling_days": 30,
+      "status": "stop"
+    },
+    "max_trades_per_day": {
+      "enabled": true,
+      "max": 2,
+      "status": "flag"
+    },
+    "max_losses_per_day": {
+      "enabled": true,
+      "max": 1,
+      "status": "stop",
+      "_": "The 'one stop per day' rule: max 1 losing trade, breach on the second."
+    },
+    "max_trades_per_week": {
+      "enabled": true,
+      "max": 5,
+      "status": "flag",
+      "_": "Overtrading flag, not a hard stop."
+    },
+    "consecutive_losses": {
+      "enabled": true,
+      "losses": 2,
+      "cooldown_sessions": 1,
+      "reset_tag": null,
+      "status": "stop",
+      "_": "After `losses` losses in a row, no trading until `cooldown_sessions` trading sessions have passed (sessions, not calendar days). reset_tag: a journal tag that ends the cooldown early - e.g. 'reviewed' once you have done the postmortem."
+    },
+    "floor_buffer": {
+      "enabled": true,
+      "buffer": {"pct": 2.0},
+      "status": "stop",
+      "_": "Stop when less than this is left between estimated equity and the account floor. The floor itself comes from the `account` argument (floor / max_loss_pct / floor_type), never from this file."
+    },
+    "min_rest": {
+      "enabled": true,
+      "minutes": 60,
+      "status": "flag",
+      "_": "Rest after a stop-out. Use 'minutes' (needs a timestamped `today` and a closed_at on the trade) or 'sessions': 1 for whole-session rest."
+    },
+    "idle": {
+      "enabled": true,
+      "sessions": 20,
+      "status": "flag",
+      "_": "No trades for this many sessions. Always a flag - being idle is never a reason to stop."
+    },
+    "profit_target_day": {
+      "enabled": false,
+      "target": {"r": 3.0},
+      "status": "flag",
+      "_": "Profit-side guard: your own rule to stop once the day is made. Off by default."
+    },
+    "profit_target_week": {
+      "enabled": false,
+      "target": {"pct": 4.0},
+      "status": "flag"
+    }
+  }
+}
