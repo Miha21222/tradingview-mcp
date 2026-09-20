@@ -11,6 +11,13 @@ raw schema is mapped to semantic fields per the owner's vault-note conventions:
 Times are parsed as `YYYY/MM/DD HH:MM:SS`; `utc_offset_hours` shifts the export's
 timezone to UTC (default 0 = the export is already UTC). No Notion writes - this is
 a read-only normalizer feeding the owner's own Notion MCP later.
+
+M9: every record is a **superset of the canonical journal record** (`schema.FIELDS`)
+- the FX Replay-specific keys (`r_pnl`, `entry_time`, `lots`, `session`, `day`, ...)
+stay exactly as they were, and the canonical keys (`date`, `opened_at`, `pnl`,
+`r_multiple`, `source`, `derived`, ...) sit beside them, so `tv_risk_guard` and any
+other consumer can read an FX Replay export without knowing it is one.
+`schema.to_canonical(record)` projects a record down to the canonical fields.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from pathlib import Path
 
 from ..backtest.forex import contract_size, killzone
 from ..symbols import resolve
+from . import schema
 
 REQUIRED_COLUMNS = {
     "id", "dateStart", "dateEnd", "pair", "rPnL", "side", "entryPrice",
@@ -49,12 +57,27 @@ def _split_tags(v: str) -> list[str]:
     return [t.strip() for t in v.split(",") if t.strip()] if v and str(v).strip() else []
 
 
-def normalize_export(rows: list[dict], utc_offset_hours: int = 0) -> tuple[list[dict], dict]:
-    records = [_normalize_row(r, utc_offset_hours) for r in rows]
+def normalize_export(
+    rows: list[dict],
+    utc_offset_hours: int = 0,
+    currency: str | None = None,
+    raw_ref_prefix: str | None = None,
+) -> tuple[list[dict], dict]:
+    """Normalize FX Replay rows. `currency` labels `pnl_currency` (the export omits it)."""
+    records = [
+        _normalize_row(r, utc_offset_hours, currency, raw_ref_prefix, i + 2)
+        for i, r in enumerate(rows)
+    ]
     return records, _summary(records)
 
 
-def _normalize_row(row: dict, utc_offset_hours: int) -> dict:
+def _normalize_row(
+    row: dict,
+    utc_offset_hours: int,
+    currency: str | None = None,
+    raw_ref_prefix: str | None = None,
+    row_number: int | None = None,
+) -> dict:
     symbol = resolve(row["pair"])
     side_raw = (row.get("side") or "").strip().lower()
     if side_raw not in ("buy", "long", "sell", "short"):
@@ -71,7 +94,33 @@ def _normalize_row(row: dict, utc_offset_hours: int) -> dict:
     r = round(r_pnl / risk, 3) if risk else None
     entry_dt = _dt(row["dateStart"], utc_offset_hours)
     exit_dt = _dt(row["dateEnd"], utc_offset_hours)
+    try:
+        lots = round(amount / contract_size(symbol.canonical), 4) if amount else None
+    except ValueError:
+        lots = None  # non-FX instrument: no defined contract size, size stays in units
+    canonical = schema.make_record(
+        source="fxreplay",
+        id=row["id"],
+        date=entry_dt.date(),
+        opened_at=entry_dt,
+        closed_at=exit_dt,
+        symbol=row["pair"],
+        side=side,
+        entry=entry,
+        exit=exit_price,
+        size=lots if lots is not None else (amount or None),
+        size_unit="lots" if lots is not None else None,
+        # `rPnL` is realized money in the export's account currency; `r` is the
+        # R-multiple recomputed from the row's own stop distance (see above), so
+        # neither number is derived - both come from the export.
+        r_multiple=r,
+        pnl=r_pnl,
+        pnl_currency=currency,
+        tags=row.get("tags"),
+        raw_ref=f"{raw_ref_prefix}#{row_number}" if raw_ref_prefix and row_number else None,
+    )
     return {
+        **canonical,
         "id": int(row["id"]),
         "symbol": symbol.canonical,
         "tv_symbol": row["pair"],
@@ -87,7 +136,7 @@ def _normalize_row(row: dict, utc_offset_hours: int) -> dict:
         "tp": round(_num(row.get("maxTP")), 6) if _num(row.get("maxTP")) is not None else None,
         "ideal_tp": round(_num(row.get("idealTP")), 6) if _num(row.get("idealTP")) is not None else None,
         "amount": amount,
-        "lots": round(amount / contract_size(symbol.canonical), 4) if amount else None,
+        "lots": lots,
         "u_pnl": _num(row.get("uPnL")),
         "r_pnl": round(r_pnl, 6),
         "risk": round(risk, 6) if risk else None,
@@ -128,7 +177,18 @@ def _summary(records: list[dict]) -> dict:
     }
 
 
-def parse_file(path: Path, utc_offset_hours: int = 0, max_rows: int = 10_000, max_bytes: int = 10_000_000) -> tuple[list[dict], dict]:
+def looks_like_fxreplay(headers) -> bool:
+    """True when a header row carries the full FX Replay export schema."""
+    return not (REQUIRED_COLUMNS - {str(h).strip() for h in (headers or [])})
+
+
+def parse_file(
+    path: Path,
+    utc_offset_hours: int = 0,
+    max_rows: int = 10_000,
+    max_bytes: int = 10_000_000,
+    currency: str | None = None,
+) -> tuple[list[dict], dict]:
     """Read an FX Replay CSV export and normalize it.
 
     Raises ValueError if the schema is missing or the file exceeds the input guard
@@ -149,4 +209,4 @@ def parse_file(path: Path, utc_offset_hours: int = 0, max_rows: int = 10_000, ma
             rows.append(dict(row))
             if len(rows) > max_rows:
                 raise ValueError(f"{path.name} has more than {max_rows} rows; refused")
-    return normalize_export(rows, utc_offset_hours)
+    return normalize_export(rows, utc_offset_hours, currency, path.name)
