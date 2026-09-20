@@ -1,0 +1,106 @@
+{
+  "_note": "LAST RESORT ONLY. Static tables used by tv_calendar_check when both live sources (Forex Factory weekly JSON, FXStreet day endpoint) fail, plus the holiday / half-day / rollover facts no economic-calendar feed reliably carries. Coverage is limited to the years listed under `coverage` and to the markets listed here - a date missing from this file means UNKNOWN, never 'nothing happens'. Verify against the exchange's own published calendar before relying on it. Ported from the collection half of the owner's indices-kb/tools/calendar_check.py (2026-09-20); the STOP/FLAG policy that script wrapped around these dates was deliberately left behind.",
+  "version": "2026-09-20",
+  "coverage": {
+    "holidays": ["2026", "2027"],
+    "scheduled_events": ["2026"],
+    "monthly_rules": "any year (approximate rules, not published dates)",
+    "rollover": "equity-index futures only, any year (third-Friday rule)"
+  },
+  "holidays": {
+    "US": {
+      "market": "NYSE / Nasdaq (US cash equities); CME equity-index futures keep an abbreviated session on most of these",
+      "tz": "America/New_York",
+      "regular_close_local": "16:00",
+      "full": {
+        "2026": [
+          ["2026-01-01", "New Year's Day"],
+          ["2026-01-19", "Martin Luther King Jr. Day"],
+          ["2026-02-16", "Washington's Birthday"],
+          ["2026-04-03", "Good Friday"],
+          ["2026-05-25", "Memorial Day"],
+          ["2026-06-19", "Juneteenth National Independence Day"],
+          ["2026-07-03", "Independence Day (observed)"],
+          ["2026-09-07", "Labor Day"],
+          ["2026-11-26", "Thanksgiving Day"],
+          ["2026-12-25", "Christmas Day"]
+        ],
+        "2027": [
+          ["2027-01-01", "New Year's Day"],
+          ["2027-01-18", "Martin Luther King Jr. Day"],
+          ["2027-02-15", "Washington's Birthday"],
+          ["2027-03-26", "Good Friday"],
+          ["2027-05-31", "Memorial Day"],
+          ["2027-06-18", "Juneteenth National Independence Day (observed)"],
+          ["2027-07-05", "Independence Day (observed)"],
+          ["2027-09-06", "Labor Day"],
+          ["2027-11-25", "Thanksgiving Day"],
+          ["2027-12-24", "Christmas Day (observed)"]
+        ]
+      },
+      "half": {
+        "2026": [
+          ["2026-11-27", "Day after Thanksgiving", "13:00"],
+          ["2026-12-24", "Christmas Eve", "13:00"]
+        ],
+        "2027": [
+          ["2027-11-26", "Day after Thanksgiving", "13:00"]
+        ]
+      }
+    }
+  },
+  "scheduled_events": {
+    "US": {
+      "2026": [
+        {"date": "2026-01-28", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-03-18", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-04-29", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-06-17", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-07-29", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-09-16", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-10-28", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"},
+        {"date": "2026-12-09", "title": "FOMC statement and rate decision", "impact": "high", "time_local": "14:00", "tz": "America/New_York"}
+      ]
+    }
+  },
+  "monthly_rules": [
+    {
+      "country": "US",
+      "title": "Non-Farm Payrolls (employment report)",
+      "impact": "high",
+      "rule": "first_friday",
+      "time_local": "08:30",
+      "tz": "America/New_York",
+      "note": "approximate: the BLS usually publishes on the first Friday, but shifts around holidays and occasionally lands on the second"
+    },
+    {
+      "country": "US",
+      "title": "Core PCE Price Index",
+      "impact": "high",
+      "rule": "last_friday",
+      "time_local": "08:30",
+      "tz": "America/New_York",
+      "note": "approximate: the BEA usually publishes near the end of the month, most often on the last Friday"
+    }
+  ],
+  "rollover": {
+    "_note": "Quarterly EQUITY-INDEX futures only: contract months Mar/Jun/Sep/Dec, final settlement on the third Friday, and the conventional roll on the Thursday eight days before it (the Thursday prior to the second Friday). Currency, rate and commodity futures use different expiry rules and are deliberately absent - an unknown root returns null instead of a guess.",
+    "rule": "third_friday",
+    "months": [3, 6, 9, 12],
+    "roll_days_before": 8,
+    "roots": {
+      "ES": {"name": "E-mini S&P 500", "exchange": "CME"},
+      "MES": {"name": "Micro E-mini S&P 500", "exchange": "CME"},
+      "NQ": {"name": "E-mini Nasdaq-100", "exchange": "CME"},
+      "MNQ": {"name": "Micro E-mini Nasdaq-100", "exchange": "CME"},
+      "YM": {"name": "E-mini Dow ($5)", "exchange": "CBOT"},
+      "MYM": {"name": "Micro E-mini Dow", "exchange": "CBOT"},
+      "RTY": {"name": "E-mini Russell 2000", "exchange": "CME"},
+      "M2K": {"name": "Micro E-mini Russell 2000", "exchange": "CME"},
+      "EMD": {"name": "E-mini S&P MidCap 400", "exchange": "CME"},
+      "NKD": {"name": "Nikkei 225 (USD)", "exchange": "CME"},
+      "FDAX": {"name": "DAX futures", "exchange": "Eurex"},
+      "FESX": {"name": "EURO STOXX 50 futures", "exchange": "Eurex"}
+    }
+  }
+}

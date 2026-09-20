@@ -11,8 +11,11 @@ DEFAULT_TOOLSETS = frozenset({"public", "data"})
 # NOT cover. Drops `public` (quotes/screener/TA - the official server does it
 # better) and keeps the opt-in `session`/`desktop` tiers off (ToS-risk tiers
 # stay an explicit choice: `TV_TOOLSETS=hybrid,session,desktop`).
+# `calendar` IS in hybrid even though the official server has an economic
+# calendar: ours also carries exchange holidays, half-days and futures rollover,
+# and degrades to a static table when a feed is down.
 HYBRID_TOOLSETS = frozenset(
-    {"data", "scan", "chart", "backtest", "pine", "journal", "strategy"}
+    {"data", "scan", "chart", "backtest", "pine", "journal", "strategy", "calendar"}
 )
 ALL_TOOLSETS = frozenset(
     {
@@ -26,6 +29,7 @@ ALL_TOOLSETS = frozenset(
         "desktop",
         "journal",
         "strategy",
+        "calendar",
     }
 )
 

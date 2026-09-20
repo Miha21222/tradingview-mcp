@@ -59,6 +59,10 @@ def build_server(settings: Settings | None = None) -> FastMCP:
         from . import journal
 
         journal.register(mcp, settings)
+    if settings.toolset_enabled("calendar"):
+        from . import calendar as calendar_toolset
+
+        calendar_toolset.register(mcp, settings)
     if settings.toolset_enabled("session"):
         from . import session
 
