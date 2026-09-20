@@ -35,6 +35,18 @@ def test_mcp_server_env_bridges_user_config():
     assert env.get("TV_SESSIONID") == "${TV_SESSIONID}"
 
 
+def test_directory_settings_are_declared_and_bridged():
+    # operator knobs, not secrets: every TV_*_DIR the server reads must be
+    # offered in userConfig AND passed through the mcpServers env bridge
+    p = _load(".claude-plugin/plugin.json")
+    uc, env = p["userConfig"], p["mcpServers"]["tradingview"]["env"]
+    for key in ("TV_CHART_DIR", "TV_JOURNAL_DIR", "TV_STRATEGY_DIR", "TV_SENTINEL_DIR"):
+        assert key in uc and uc[key]["type"] == "string", key
+        assert uc[key].get("sensitive") is not True, key
+        assert uc[key]["description"].strip(), key
+        assert env.get(key) == "${%s}" % key, key
+
+
 def test_official_tradingview_mcp_registered_side_by_side():
     # hybrid distribution: one plugin install brings both servers
     servers = _load(".claude-plugin/plugin.json")["mcpServers"]

@@ -56,6 +56,11 @@
       "title": "Declarative strategy folder",
       "description": "Where tv_strategy_list / tv_strategy_run read YAML strategy specs."
     },
+    "TV_SENTINEL_DIR": {
+      "type": "string",
+      "title": "Sentinel run folder",
+      "description": "Where the `sentinel` toolset writes one JSON run file per watch (default ~/.tvmcp/sentinel)."
+    },
     "TV_CDP_URL": {
       "type": "string",
       "title": "TradingView Desktop CDP URL",
@@ -88,6 +93,7 @@
         "TV_CHART_DIR": "${TV_CHART_DIR}",
         "TV_JOURNAL_DIR": "${TV_JOURNAL_DIR}",
         "TV_STRATEGY_DIR": "${TV_STRATEGY_DIR}",
+        "TV_SENTINEL_DIR": "${TV_SENTINEL_DIR}",
         "TV_CDP_URL": "${TV_CDP_URL}",
         "TV_DESKTOP_EXE": "${TV_DESKTOP_EXE}"
       }
