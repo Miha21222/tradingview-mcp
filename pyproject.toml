@@ -20,6 +20,17 @@ dependencies = [
     "pyyaml>=6.0",
 ]
 
+[project.optional-dependencies]
+# The knowledge-base stack, installed only by a host that also runs gt-rag
+# (Strategy Desk bundles both and gives them ONE environment: `uv sync --extra
+# kb`). tvmcp itself never imports these — keeping them out of `dependencies`
+# is what lets a plain tvmcp install stay small and torch-free.
+kb = [
+    "chromadb>=1.5,<2",
+    "fastembed>=0.8,<1",
+    "rapidfuzz>=3",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8",
